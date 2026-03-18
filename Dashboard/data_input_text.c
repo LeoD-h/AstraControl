@@ -452,6 +452,64 @@ int main(int argc, char **argv) {
 
             if (!strcmp(line, "quit") || !strcmp(line, "QUIT")) break;
 
+            /* ---- help ---- */
+            if (!strcmp(line, "help") || !strcmp(line, "HELP")) {
+                printf("\n=== controle_fusee_data : commandes disponibles ===\n");
+                printf("  help            Affiche cette aide\n");
+                printf("  quit            Quitter le programme\n");
+                printf("  LAUNCH          Simuler un lancement (mise a jour modele local)\n");
+                printf("  GEN 0|1         Activer/desactiver la generation automatique\n");
+                printf("  SET <champ> <v> Envoyer une valeur directe au satellite\n");
+                printf("                  Champs : ALTITUDE SPEED FUEL TEMP PRESSURE THRUST STRESS\n");
+                printf("  fault           Simuler une PANNE (SET STRESS 90 -> EVENT PROBLEM)\n");
+                printf("                  Requis : etat FLYING, aucune pressure_fault active\n");
+                printf("  resolve         Reduire les symptomes de panne (SET STRESS 0 + TEMP 20)\n");
+                printf("                  Note : la resolution complete se fait via BT8 sur JoyPi\n");
+                printf("===================================================\n\n");
+                fflush(stdout);
+                continue;
+            }
+
+            /* ---- fault : simuler une panne ---- */
+            if (!strcmp(line, "fault") || !strcmp(line, "FAULT")) {
+                if (fd < 0) {
+                    printf("[INJECTOR] non connecte au satellite — impossible d'injecter la panne\n");
+                    fflush(stdout);
+                    continue;
+                }
+                printf("[INJECTOR] Injection panne : SET STRESS 90 (> seuil %d)\n", 80);
+                /* SET STRESS 90 > SAT_STRESS_CRITICAL(80) → EVENT PROBLEM si FLYING */
+                if (send_set(fd, "SET STRESS 90") < 0) {
+                    printf("[INJECTOR] erreur envoi — connexion perdue\n");
+                    close(fd); fd = -1;
+                } else {
+                    printf("[INJECTOR] Panne injectée. Utiliser BT8 (JoyPi) pour resoudre.\n");
+                }
+                fflush(stdout);
+                continue;
+            }
+
+            /* ---- resolve : réduire les symptomes de panne ---- */
+            if (!strcmp(line, "resolve") || !strcmp(line, "RESOLVE")) {
+                if (fd < 0) {
+                    printf("[INJECTOR] non connecte au satellite\n");
+                    fflush(stdout);
+                    continue;
+                }
+                printf("[INJECTOR] Reduction symptomes panne (SET STRESS 0 + SET TEMP 20)\n");
+                int err = 0;
+                if (send_set(fd, "SET STRESS 0") < 0)  err = 1;
+                if (send_set(fd, "SET TEMP 20")   < 0) err = 1;
+                if (err) {
+                    printf("[INJECTOR] erreur envoi — connexion perdue\n");
+                    close(fd); fd = -1;
+                } else {
+                    printf("[INJECTOR] Symptomes reduits. Resolution complete = BT8 JoyPi (CMD PRES).\n");
+                }
+                fflush(stdout);
+                continue;
+            }
+
             if (!strncmp(line, "GEN ", 4)) {
                 gm.gen_enabled = atoi(line + 4) ? 1 : 0;
                 printf("[GEN] mode=%d\n", gm.gen_enabled);
@@ -480,7 +538,7 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            printf("[STDIN] commande inconnue: %s\n", line);
+            printf("[STDIN] commande inconnue (tapez 'help'): %s\n", line);
             fflush(stdout);
         }
 
