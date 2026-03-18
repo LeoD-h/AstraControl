@@ -34,18 +34,22 @@ JOYPI_NCURSES_LIBS = -lncursesw
 CFLAGS_BASE = -std=gnu99 -Wall -Wextra -O2
 
 # Sources
-SRC_SATELLITE  = Network/satellite_server.c
+SRC_SATELLITE  = Network/satellite_server.c Network/satellite_handler.c
 SRC_DATA_VM    = Dashboard/data_input_text.c Dashboard/dashboard_common.c
-SRC_DASHBOARD  = Dashboard/main.c Dashboard/dashboard_logic.c Dashboard/dashboard_visuals.c Dashboard/pipes.c
-SRC_CONTROLLER = JoyPi/joypi_controller.c JoyPi/actuators.c
+SRC_DASHBOARD  = Dashboard/main.c Dashboard/dashboard_logic.c Dashboard/dashboard_dynamics.c \
+                 Dashboard/dashboard_visuals.c Dashboard/pipes.c
+SRC_CONTROLLER = JoyPi/joypi_controller.c JoyPi/joypi_ctrl_net.c JoyPi/joypi_ctrl_keys.c \
+                 JoyPi/actuators.c JoyPi/actuators_display.c
 SRC_BTN_TEST   = JoyPi/hardware_buttons_test.c
 SRC_ACT_TEST   = JoyPi/hardware_actuators_test.c
 SRC_STOP_TEST  = JoyPi/hardware_stop.c
 SRC_LED_TEST   = Test/led.c
+SRC_MOTOR_TEST = Test/moteur.c
 
 # Binaires natifs (x86, pour tests VM)
-SAT_NATIVE       = $(BIN_UTIL_DIR)/satellite_server
-DATA_VM_NATIVE   = $(BIN_UTIL_DIR)/controle_fusee_data
+SAT_NATIVE         = $(BIN_UTIL_DIR)/satellite_server
+DATA_VM_NATIVE     = $(BIN_UTIL_DIR)/controle_fusee_data
+DASHBOARD_NATIVE   = $(BIN_UTIL_DIR)/controle_fusee_x86
 
 # Binaires cross-compilés RPi (pour déploiement VM→RPi)
 SAT_RPI          = $(BIN_UTIL_DIR)/satellite_server_rpi
@@ -58,6 +62,7 @@ BTN_TEST_JOYPI   = $(BIN_PROTO_DIR)/hardware_buttons_test_joypi
 ACT_TEST_JOYPI   = $(BIN_PROTO_DIR)/hardware_actuators_test_joypi
 STOP_TEST_JOYPI  = $(BIN_PROTO_DIR)/hardware_stop_joypi
 LED_TEST_JOYPI   = $(BIN_PROTO_DIR)/led_test_joypi
+MOTOR_TEST_JOYPI = $(BIN_PROTO_DIR)/moteur_test_joypi
 
 ifneq ($(V),1)
 Q ?= @
@@ -70,27 +75,29 @@ endif
 all: vm joypi
 
 # -- VM (satellite) --
-# Compile en natif x86 ET en cross ARM RPi
+# Compile en natif x86 ET en cross ARM RPi + dashboard x86 pour test local
 vm: $(BIN_UTIL_DIR) $(BIN_PROTO_DIR) \
-    $(SAT_NATIVE) $(DATA_VM_NATIVE) \
+    $(SAT_NATIVE) $(DATA_VM_NATIVE) $(DASHBOARD_NATIVE) \
     $(SAT_RPI) $(DATA_VM_RPI)
 	$(Q)rm -rf $(VM_DIR)
 	$(Q)mkdir -p $(VM_DIR)/bin-util
-	$(Q)cp -f $(SAT_NATIVE)     $(VM_DIR)/bin-util/satellite_server
-	$(Q)cp -f $(DATA_VM_NATIVE) $(VM_DIR)/bin-util/controle_fusee_data
-	$(Q)cp -f $(SAT_RPI)        $(VM_DIR)/bin-util/satellite_server_rpi
-	$(Q)cp -f $(DATA_VM_RPI)    $(VM_DIR)/bin-util/controle_fusee_data_rpi
+	$(Q)cp -f $(SAT_NATIVE)      $(VM_DIR)/bin-util/satellite_server
+	$(Q)cp -f $(DATA_VM_NATIVE)  $(VM_DIR)/bin-util/controle_fusee_data
+	$(Q)cp -f $(DASHBOARD_NATIVE) $(VM_DIR)/bin-util/controle_fusee
+	$(Q)cp -f $(SAT_RPI)         $(VM_DIR)/bin-util/satellite_server_rpi
+	$(Q)cp -f $(DATA_VM_RPI)     $(VM_DIR)/bin-util/controle_fusee_data_rpi
 	@echo "VM ready: $(VM_DIR)/"
 	@echo "  satellite_server        <- x86 (pour VM)"
+	@echo "  controle_fusee_data     <- x86 (injecteur)"
+	@echo "  controle_fusee          <- x86 (dashboard ncurses, test local)"
 	@echo "  satellite_server_rpi    <- ARM (pour RPi futur)"
-	@echo "  controle_fusee_data     <- x86"
 	@echo "  controle_fusee_data_rpi <- ARM"
 
 # -- JoyPi (contrôleur) --
 # Cross-compile ARM avec wiringPi + ncurses
 joypi: $(BIN_UTIL_DIR) $(BIN_PROTO_DIR) \
 	$(DASHBOARD_JOYPI) $(CONTROLLER_JOYPI) \
-	$(BTN_TEST_JOYPI) $(ACT_TEST_JOYPI) $(STOP_TEST_JOYPI) $(LED_TEST_JOYPI)
+	$(BTN_TEST_JOYPI) $(ACT_TEST_JOYPI) $(STOP_TEST_JOYPI) $(LED_TEST_JOYPI) $(MOTOR_TEST_JOYPI)
 	$(Q)rm -rf $(JOYPI_DIR)
 	$(Q)mkdir -p $(JOYPI_DIR)/bin-util $(JOYPI_DIR)/bin-proto $(JOYPI_DIR)/lib
 	$(Q)cp -f $(DASHBOARD_JOYPI)  $(JOYPI_DIR)/bin-util/controle_fusee
@@ -99,6 +106,7 @@ joypi: $(BIN_UTIL_DIR) $(BIN_PROTO_DIR) \
 	$(Q)cp -f $(ACT_TEST_JOYPI)   $(JOYPI_DIR)/bin-proto/hardware_actuators_test
 	$(Q)cp -f $(STOP_TEST_JOYPI)  $(JOYPI_DIR)/bin-proto/hardware_stop
 	$(Q)cp -f $(LED_TEST_JOYPI)   $(JOYPI_DIR)/bin-proto/led_test
+	$(Q)cp -f $(MOTOR_TEST_JOYPI) $(JOYPI_DIR)/bin-proto/moteur_test
 	$(Q)cp -f $(JOYPI_NCURSES_ROOT)/lib/libncursesw.so.6.6 $(JOYPI_DIR)/lib/ 2>/dev/null || true
 	$(Q)ln -sf libncursesw.so.6.6 $(JOYPI_DIR)/lib/libncursesw.so.6 2>/dev/null || true
 	$(Q)ln -sf libncursesw.so.6.6 $(JOYPI_DIR)/lib/libncurses.so.6 2>/dev/null || true
@@ -167,6 +175,11 @@ $(DATA_VM_RPI): $(SRC_DATA_VM) | $(BIN_UTIL_DIR)
 	$(Q)$(CC_CROSS) $(CFLAGS_BASE) -IDashboard -INetwork -IJoyPi -o $@ $^
 	@echo "  [ARM]  controle_fusee_data_rpi"
 
+# VM : controle_fusee x86 (dashboard ncurses natif, pour test local sur VM)
+$(DASHBOARD_NATIVE): $(SRC_DASHBOARD) | $(BIN_UTIL_DIR)
+	$(Q)$(CC_NATIVE) $(CFLAGS_BASE) -IDashboard -INetwork -IJoyPi -o $@ $^ -lncurses
+	@echo "  [x86]  controle_fusee (dashboard ncurses)"
+
 # JoyPi : controle_fusee (dashboard ncurses ARM)
 $(DASHBOARD_JOYPI): $(SRC_DASHBOARD) | $(BIN_UTIL_DIR)
 	$(Q)$(CC_CROSS) $(CFLAGS_BASE) -IDashboard -INetwork -IJoyPi $(JOYPI_NCURSES_INC) -o $@ $^ $(JOYPI_NCURSES_LDIR) $(JOYPI_NCURSES_LIBS)
@@ -193,6 +206,10 @@ $(STOP_TEST_JOYPI): $(SRC_STOP_TEST) | $(BIN_PROTO_DIR)
 $(LED_TEST_JOYPI): $(SRC_LED_TEST) | $(BIN_PROTO_DIR)
 	$(Q)$(CC_CROSS) $(CFLAGS_BASE) -IDashboard -INetwork -IJoyPi $(WIRINGPI_INC) -DUSE_WIRINGPI -o $@ $^ $(WIRINGPI_LDIR) -lwiringPi
 	@echo "  [ARM]  led_test_joypi"
+
+$(MOTOR_TEST_JOYPI): $(SRC_MOTOR_TEST) | $(BIN_PROTO_DIR)
+	$(Q)$(CC_CROSS) $(CFLAGS_BASE) -IDashboard -INetwork -IJoyPi $(WIRINGPI_INC) -DUSE_WIRINGPI -o $@ $^ $(WIRINGPI_LDIR) -lwiringPi
+	@echo "  [ARM]  moteur_test_joypi"
 
 # ------------ Envoi via SCP ------------
 
