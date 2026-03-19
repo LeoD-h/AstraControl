@@ -11,6 +11,7 @@
 #include "dashboard.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 
 static bool in_orbit(const RocketState *st) {
     return st->altitude >= 100000 && st->speed >= 27000;

@@ -35,11 +35,11 @@ CFLAGS_BASE = -std=gnu99 -Wall -Wextra -O2
 
 # Sources
 SRC_SATELLITE  = Network/satellite_server.c Network/satellite_handler.c
-SRC_DATA_VM    = Dashboard/data_input_text.c Dashboard/dashboard_common.c
+SRC_DATA_VM    = Dashboard/data_input_text.c Dashboard/data_gen_model.c Dashboard/dashboard_common.c
 SRC_DASHBOARD  = Dashboard/main.c Dashboard/dashboard_logic.c Dashboard/dashboard_dynamics.c \
                  Dashboard/dashboard_visuals.c Dashboard/pipes.c
 SRC_CONTROLLER = JoyPi/joypi_controller.c JoyPi/joypi_ctrl_net.c JoyPi/joypi_ctrl_keys.c \
-                 JoyPi/actuators.c JoyPi/actuators_display.c
+                 JoyPi/joypi_ctrl_actions.c JoyPi/actuators.c JoyPi/actuators_display.c
 SRC_BTN_TEST   = JoyPi/hardware_buttons_test.c
 SRC_ACT_TEST   = JoyPi/hardware_actuators_test.c
 SRC_STOP_TEST  = JoyPi/hardware_stop.c

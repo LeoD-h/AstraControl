@@ -10,154 +10,9 @@
  * Version     : 2.0
  ************************************************************/
 #define _GNU_SOURCE
-#include "dashboard_common.h"
+#include "data_gen_model.h"
 
 #include <sys/select.h>
-
-/* ------------------------------------------------------------------ */
-/*  Modèle physique                                                     */
-/* ------------------------------------------------------------------ */
-
-typedef struct {
-    int  gen_enabled;
-    bool launched;
-    bool landing;
-    bool exploded;
-    bool paused;
-    double altitude_m;
-    double speed_kmh;
-    double fuel_pct;
-    double temp_c;
-    double pressure_hpa;
-    double thrust_kn;
-    double stress;
-    unsigned long long last_tick_ms;
-    unsigned long long last_emit_ms;
-} GenModel;
-
-static double clampd(double v, double lo, double hi) {
-    if (v < lo) return lo;
-    if (v > hi) return hi;
-    return v;
-}
-
-static void gen_init(GenModel *gm) {
-    memset(gm, 0, sizeof(*gm));
-    gm->gen_enabled   = 1;
-    gm->fuel_pct      = 100.0;
-    gm->temp_c        = 20.0;
-    gm->pressure_hpa  = 1013.0;
-    gm->last_tick_ms  = now_ms();
-    gm->last_emit_ms  = gm->last_tick_ms;
-}
-
-static void gen_reset_to_ground(GenModel *gm) {
-    gm->launched     = false;
-    gm->landing      = false;
-    gm->exploded     = false;
-    gm->paused       = false;
-    gm->altitude_m   = 0.0;
-    gm->speed_kmh    = 0.0;
-    gm->fuel_pct     = 100.0;
-    gm->temp_c       = 20.0;
-    gm->pressure_hpa = 1013.0;
-    gm->thrust_kn    = 0.0;
-    gm->stress       = 0.0;
-}
-
-static void gen_on_event(GenModel *gm, const char *event) {
-    if (!event || !event[0]) return;
-
-    if (!strcmp(event, "LAUNCH")) {
-        gm->launched = true;
-        gm->landing  = false;
-        gm->exploded = false;
-        gm->paused   = false;
-        if (gm->fuel_pct < 5.0) gm->fuel_pct = 100.0;
-    } else if (!strcmp(event, "LAND")) {
-        if (gm->launched) gm->landing = true;
-    } else if (!strcmp(event, "PAUSE")) {
-        gm->paused = true;
-    } else if (!strcmp(event, "RESUME")) {
-        gm->paused = false;
-    } else if (!strcmp(event, "TILT_LEFT") || !strcmp(event, "TILT_RIGHT")) {
-        if (gm->launched && gm->speed_kmh > 700.0) gm->stress += 1.2;
-    } else if (!strcmp(event, "FIX_PROBLEM")) {
-        gen_reset_to_ground(gm);
-    }
-}
-
-static void gen_step(GenModel *gm, double dt_s) {
-    if (!gm->gen_enabled || gm->paused) return;
-
-    if (gm->exploded) {
-        gm->thrust_kn   = 0.0;
-        gm->speed_kmh  *= 0.92;
-        gm->altitude_m -= 220.0 * dt_s;
-        gm->temp_c     += 80.0 * dt_s;
-        gm->stress     += 5.0 * dt_s;
-        if (gm->altitude_m < 0.0) gm->altitude_m = 0.0;
-        if (gm->temp_c > 900.0)   gm->temp_c = 900.0;
-
-    } else if (gm->launched && !gm->landing) {
-        gm->thrust_kn = 1600.0 - (gm->altitude_m / 120.0);
-        gm->thrust_kn = clampd(gm->thrust_kn, 800.0, 1700.0);
-
-        gm->speed_kmh += (55.0 - (gm->speed_kmh / 600.0) - (gm->altitude_m / 8000.0)) * dt_s;
-        gm->speed_kmh  = clampd(gm->speed_kmh, 0.0, 30000.0);
-        gm->altitude_m += (gm->speed_kmh / 3.6) * dt_s;
-
-        gm->fuel_pct -= (0.35 + gm->thrust_kn / 6000.0) * dt_s;
-        if (gm->fuel_pct <= 0.0) {
-            gm->fuel_pct = 0.0;
-            gm->landing  = true;
-        }
-
-    } else if (gm->launched && gm->landing) {
-        gm->thrust_kn  = 700.0;
-        gm->speed_kmh -= 80.0 * dt_s;
-        if (gm->speed_kmh < 120.0) gm->speed_kmh = 120.0;
-
-        gm->altitude_m -= (gm->speed_kmh / 3.6) * dt_s;
-        gm->fuel_pct   -= 0.15 * dt_s;
-        gm->fuel_pct    = clampd(gm->fuel_pct, 0.0, 100.0);
-
-        if (gm->altitude_m <= 0.0) {
-            gm->altitude_m = 0.0;
-            if (gm->speed_kmh > 260.0) {
-                gm->exploded = true;
-            } else {
-                gm->launched  = false;
-                gm->landing   = false;
-                gm->speed_kmh = 0.0;
-                gm->thrust_kn = 0.0;
-            }
-        }
-    } else {
-        gm->thrust_kn = 0.0;
-        if (gm->speed_kmh > 0.0) gm->speed_kmh *= 0.95;
-        if (gm->speed_kmh < 1.0) gm->speed_kmh  = 0.0;
-        if (gm->altitude_m > 0.0) {
-            gm->altitude_m -= 30.0 * dt_s;
-            if (gm->altitude_m < 0.0) gm->altitude_m = 0.0;
-        }
-        if (gm->stress > 0.0) gm->stress -= 0.4 * dt_s;
-        if (gm->stress < 0.0) gm->stress  = 0.0;
-    }
-
-    if (!gm->exploded) {
-        double target_temp = 15.0 + (gm->speed_kmh / 180.0) + (gm->thrust_kn / 85.0) - (gm->altitude_m / 1200.0);
-        target_temp = clampd(target_temp, -50.0, 450.0);
-        gm->temp_c += (target_temp - gm->temp_c) * 0.25;
-    }
-
-    gm->pressure_hpa = 1013.0 - (gm->altitude_m * 0.06);
-    gm->pressure_hpa = clampd(gm->pressure_hpa, 30.0, 1013.0);
-
-    if (gm->temp_c > 380.0) gm->stress += (gm->temp_c - 380.0) * 0.02 * dt_s;
-    if (gm->fuel_pct < 4.0 && gm->thrust_kn > 1000.0) gm->stress += 8.0 * dt_s;
-    if (gm->stress > 100.0) gm->exploded = true;
-}
 
 /* ------------------------------------------------------------------ */
 /*  Connexion satellite_server                                          */
@@ -212,7 +67,6 @@ static int connect_to_satellite(const char *ip, int port) {
 static void reconnect_if_needed(int *fd_ptr, const char *ip, int port) {
     if (*fd_ptr >= 0) return;
 
-    /* Attente non-bloquante : throttle a 3s entre tentatives */
     static unsigned long long last_attempt_ms = 0;
     unsigned long long tnow = now_ms();
     if (tnow - last_attempt_ms < 3000ULL) return;
@@ -231,19 +85,12 @@ static void reconnect_if_needed(int *fd_ptr, const char *ip, int port) {
 /*  Envoi télémétrie                                                    */
 /* ------------------------------------------------------------------ */
 
-/*
- * Envoie un SET et lit le OK correspondant.
- * Le fd est non-bloquant pour la réception, on utilise select avec
- * un timeout court pour lire la réponse.
- * Retourne 0 si OK, -1 si erreur.
- */
 static int send_set(int fd, const char *line) {
     char msg[128];
     int len = snprintf(msg, sizeof(msg), "%s\n", line);
     ssize_t nw = write(fd, msg, (size_t)len);
     (void)nw;
 
-    /* Attente réponse (non-bloquant : select 200ms) */
     fd_set rfds;
     struct timeval tv;
     FD_ZERO(&rfds);
@@ -257,7 +104,6 @@ static int send_set(int fd, const char *line) {
     ssize_t nr = read(fd, reply, sizeof(reply) - 1);
     if (nr <= 0) return -1;
     reply[nr] = '\0';
-    /* On accepte toute réponse contenant "OK" */
     return strstr(reply, "OK") ? 0 : -1;
 }
 
@@ -284,24 +130,17 @@ static int send_telemetry(int fd, GenModel *gm) {
 /*  Réception événements serveur (non-bloquant)                         */
 /* ------------------------------------------------------------------ */
 
-/*
- * Lit les données disponibles sur fd, accumule dans pending[used],
- * parse les lignes complètes et appelle gen_on_event pour chaque
- * CMD_EVENT reçu.
- * Retourne -1 si la connexion est coupée, 0 sinon.
- */
 static int poll_server_events(int fd, char *pending, size_t *used, GenModel *gm) {
     char buf[512];
 
     while (1) {
         ssize_t nr = read(fd, buf, sizeof(buf) - 1);
         if (nr < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) break; /* rien à lire */
-            return -1;                                           /* erreur réelle */
+            if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+            return -1;
         }
-        if (nr == 0) return -1;                                  /* connexion fermée */
+        if (nr == 0) return -1;
 
-        /* Vérifier débordement buffer */
         if (*used + (size_t)nr >= 1024 - 1) {
             *used = 0;
             pending[0] = '\0';
@@ -311,15 +150,12 @@ static int poll_server_events(int fd, char *pending, size_t *used, GenModel *gm)
         pending[*used]  = '\0';
     }
 
-    /* Parser les lignes complètes */
     char *start = pending;
     char *nl;
     while ((nl = strchr(start, '\n')) != NULL) {
         *nl = '\0';
-        /* Traiter la ligne */
         if (strncmp(start, "CMD_EVENT ", 10) == 0) {
             const char *ev = start + 10;
-            /* Supprimer éventuel \r */
             char ev_clean[64];
             snprintf(ev_clean, sizeof(ev_clean), "%s", ev);
             char *cr = strchr(ev_clean, '\r');
@@ -331,7 +167,6 @@ static int poll_server_events(int fd, char *pending, size_t *used, GenModel *gm)
         start = nl + 1;
     }
 
-    /* Conserver le fragment partiel */
     size_t remain = strlen(start);
     memmove(pending, start, remain + 1);
     *used = remain;
@@ -398,7 +233,6 @@ int main(int argc, char **argv) {
         /* --- Reconnexion si nécessaire --- */
         if (fd < 0) {
             reconnect_if_needed(&fd, ip, port);
-            /* Réinitialiser le buffer après reconnexion */
             if (fd >= 0) {
                 used = 0;
                 pending[0] = '\0';
@@ -438,7 +272,7 @@ int main(int argc, char **argv) {
         }
         struct timeval tv;
         tv.tv_sec  = 0;
-        tv.tv_usec = 100000; /* 100ms */
+        tv.tv_usec = 100000;
         int rc = select(maxfd + 1, &rfds, NULL, NULL, &tv);
         if (rc < 0 && errno != EINTR) break;
         if (rc <= 0) continue;
@@ -452,7 +286,6 @@ int main(int argc, char **argv) {
 
             if (!strcmp(line, "quit") || !strcmp(line, "QUIT")) break;
 
-            /* ---- help ---- */
             if (!strcmp(line, "help") || !strcmp(line, "HELP")) {
                 printf("\n=== controle_fusee_data : commandes disponibles ===\n");
                 printf("  help            Affiche cette aide\n");
@@ -470,7 +303,6 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            /* ---- fault : simuler une panne ---- */
             if (!strcmp(line, "fault") || !strcmp(line, "FAULT")) {
                 if (fd < 0) {
                     printf("[INJECTOR] non connecte au satellite — impossible d'injecter la panne\n");
@@ -478,7 +310,6 @@ int main(int argc, char **argv) {
                     continue;
                 }
                 printf("[INJECTOR] Injection panne : SET STRESS 90 (> seuil %d)\n", 80);
-                /* SET STRESS 90 > SAT_STRESS_CRITICAL(80) → EVENT PROBLEM si FLYING */
                 if (send_set(fd, "SET STRESS 90") < 0) {
                     printf("[INJECTOR] erreur envoi — connexion perdue\n");
                     close(fd); fd = -1;
@@ -489,7 +320,6 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            /* ---- resolve : réduire les symptomes de panne ---- */
             if (!strcmp(line, "resolve") || !strcmp(line, "RESOLVE")) {
                 if (fd < 0) {
                     printf("[INJECTOR] non connecte au satellite\n");
@@ -524,7 +354,6 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            /* Commande directe SET XXX v envoyée au serveur */
             if (!strncmp(line, "SET ", 4) && fd >= 0) {
                 if (send_set(fd, line) < 0) {
                     printf("[INJECTOR] erreur envoi SET – connexion perdue\n");
