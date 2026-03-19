@@ -49,7 +49,7 @@ void broadcast_injectors(SatClientH clients[], const char *msg) {
 /* ------------------------------------------------------------------ */
 
 void push_telemetry(SatClientH clients[]) {
-    char buf[256];
+    char buf[512];
     snprintf(buf, sizeof(buf),
              "TELEMETRY alt=%d speed=%d fuel=%d temp=%d pressure=%d thrust=%d state=%s",
              g_telem.altitude,
@@ -125,6 +125,8 @@ static void handle_controller_cmd(SatClientH clients[], int idx, const char *lin
         g_telem.state              = SAT_STATE_FLYING;
         g_telem.pressure_fault     = false;
         g_telem.pressure_corrector = false;
+        g_telem.fault1_active      = false;
+        g_telem.fault2_active      = false;
         send_to_client(c->fd, "OK LAUNCH");
         broadcast_controllers(clients, "EVENT LAUNCH");
         broadcast_injectors(clients, "CMD_EVENT LAUNCH");
@@ -185,6 +187,34 @@ static void handle_controller_cmd(SatClientH clients[], int idx, const char *lin
             write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "CLEAR_ALERTS");
             log_line("INFO", "PRESSION: nominale peer=%s", c->peer);
         }
+        return;
+    }
+
+    if (strcmp(line, "CMD REP1") == 0) {
+        if (!g_telem.fault1_active) {
+            send_to_client(c->fd, "OK REP1_NONE");
+            return;
+        }
+        g_telem.fault1_active = false;
+        send_to_client(c->fd, "OK REP1_FIX");
+        broadcast_controllers(clients, "EVENT RESOLVED1");
+        broadcast_injectors(clients, "CMD_EVENT FIX_TEMP");
+        write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", "PROBLEM OFF");
+        log_line("INFO", "CMD REP1 : panne temperature resolue peer=%s", c->peer);
+        return;
+    }
+
+    if (strcmp(line, "CMD REP2") == 0) {
+        if (!g_telem.fault2_active) {
+            send_to_client(c->fd, "OK REP2_NONE");
+            return;
+        }
+        g_telem.fault2_active = false;
+        send_to_client(c->fd, "OK REP2_FIX");
+        broadcast_controllers(clients, "EVENT RESOLVED2");
+        broadcast_injectors(clients, "CMD_EVENT FIX_STRESS");
+        write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", "PROBLEM OFF");
+        log_line("INFO", "CMD REP2 : panne stress resolue peer=%s", c->peer);
         return;
     }
 
@@ -255,9 +285,11 @@ static void handle_injector_cmd(SatClientH clients[], int idx, const char *line)
                 write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", buf);
                 if (val > SAT_TEMP_CRITICAL
                         && g_telem.state == SAT_STATE_FLYING
-                        && !g_telem.pressure_fault) {
-                    broadcast_controllers(clients, "EVENT PROBLEM");
-                    log_line("WARN", "temperature critique %dC -> EVENT PROBLEM", val);
+                        && !g_telem.fault1_active) {
+                    g_telem.fault1_active = true;
+                    broadcast_controllers(clients, "EVENT PROBLEM1");
+                    write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", "PROBLEM ON");
+                    log_line("WARN", "temperature critique %dC -> EVENT PROBLEM1", val);
                 }
             } else if (strcmp(field, "PRESSURE") == 0) {
                 g_telem.pressure = val;
@@ -273,9 +305,11 @@ static void handle_injector_cmd(SatClientH clients[], int idx, const char *line)
                 g_telem.stress = val;
                 if (val > SAT_STRESS_CRITICAL
                         && g_telem.state == SAT_STATE_FLYING
-                        && !g_telem.pressure_fault) {
-                    broadcast_controllers(clients, "EVENT PROBLEM");
-                    log_line("WARN", "stress critique %d -> EVENT PROBLEM", val);
+                        && !g_telem.fault2_active) {
+                    g_telem.fault2_active = true;
+                    broadcast_controllers(clients, "EVENT PROBLEM2");
+                    write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", "PROBLEM ON");
+                    log_line("WARN", "stress critique %d -> EVENT PROBLEM2", val);
                 }
             }
             send_to_client(c->fd, "OK");

@@ -33,7 +33,13 @@ void update_dynamics(RocketState *st, int frame_ms) {
     }
 
     if (st->launched && !st->landing) {
-        if (st->fuel > 0) {
+        if (st->problem_active) {
+            /* Panne active : perte de poussée, descente forcée */
+            if (st->fuel > 0) st->fuel -= 1;
+            st->speed    = st->speed    > 20 ? st->speed    - 20 : 0;
+            st->altitude = st->altitude > 18 ? st->altitude - 18 : 0;
+            st->flame_size = 1;
+        } else if (st->fuel > 0) {
             st->fuel -= 1;
             st->speed += 6;
             st->altitude += st->speed / 70;
@@ -95,10 +101,12 @@ void update_dynamics(RocketState *st, int frame_ms) {
         }
 
         if (st->altitude <= 0) {
-            st->altitude  = 0;
-            st->landing   = false;
-            st->launched  = false;
-            st->flame_size = 0;
+            st->altitude       = 0;
+            st->landing        = false;
+            st->launched       = false;
+            st->flame_size     = 0;
+            st->problem_active = false;
+            st->alerts[2]      = false;
             snprintf(st->last_event, sizeof(st->last_event), "Touchdown confirmed");
         }
     }

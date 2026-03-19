@@ -294,27 +294,38 @@ int main(int argc, char **argv) {
                 printf("  GEN 0|1         Activer/desactiver la generation automatique\n");
                 printf("  SET <champ> <v> Envoyer une valeur directe au satellite\n");
                 printf("                  Champs : ALTITUDE SPEED FUEL TEMP PRESSURE THRUST STRESS\n");
-                printf("  fault           Simuler une PANNE (SET STRESS 90 -> EVENT PROBLEM)\n");
-                printf("                  Requis : etat FLYING, aucune pressure_fault active\n");
-                printf("  resolve         Reduire les symptomes de panne (SET STRESS 0 + TEMP 20)\n");
-                printf("                  Note : la resolution complete se fait via BT8 sur JoyPi\n");
+                printf("  fault1          Panne 1 : temperature critique (SET TEMP 420 -> EVENT PROBLEM1)\n");
+                printf("                  Resolution : BT7 sur JoyPi (CMD REP1)\n");
+                printf("  fault2 / fault  Panne 2 : stress structurel (SET STRESS 90 -> EVENT PROBLEM2)\n");
+                printf("                  Resolution : BT8 sur JoyPi (CMD REP2)\n");
+                printf("  resolve         Reduire symptomes (SET STRESS 0 + TEMP 20)\n");
                 printf("===================================================\n\n");
                 fflush(stdout);
                 continue;
             }
 
-            if (!strcmp(line, "fault") || !strcmp(line, "FAULT")) {
-                if (fd < 0) {
-                    printf("[INJECTOR] non connecte au satellite — impossible d'injecter la panne\n");
-                    fflush(stdout);
-                    continue;
+            if (!strcmp(line, "fault1") || !strcmp(line, "FAULT1")) {
+                if (fd < 0) { printf("[INJECTOR] non connecte\n"); fflush(stdout); continue; }
+                printf("[INJECTOR] Panne 1 : SET TEMP 420 (temperature critique)\n");
+                if (send_set(fd, "SET TEMP 420") < 0) {
+                    printf("[INJECTOR] erreur envoi — connexion perdue\n");
+                    close(fd); fd = -1;
+                } else {
+                    printf("[INJECTOR] Panne 1 injectee. Resoudre avec BT7 (CMD REP1).\n");
                 }
-                printf("[INJECTOR] Injection panne : SET STRESS 90 (> seuil %d)\n", 80);
+                fflush(stdout);
+                continue;
+            }
+
+            if (!strcmp(line, "fault") || !strcmp(line, "FAULT")
+                    || !strcmp(line, "fault2") || !strcmp(line, "FAULT2")) {
+                if (fd < 0) { printf("[INJECTOR] non connecte\n"); fflush(stdout); continue; }
+                printf("[INJECTOR] Panne 2 : SET STRESS 90 (stress structurel)\n");
                 if (send_set(fd, "SET STRESS 90") < 0) {
                     printf("[INJECTOR] erreur envoi — connexion perdue\n");
                     close(fd); fd = -1;
                 } else {
-                    printf("[INJECTOR] Panne injectée. Utiliser BT8 (JoyPi) pour resoudre.\n");
+                    printf("[INJECTOR] Panne 2 injectee. Resoudre avec BT8 (CMD REP2).\n");
                 }
                 fflush(stdout);
                 continue;
@@ -334,7 +345,7 @@ int main(int argc, char **argv) {
                     printf("[INJECTOR] erreur envoi — connexion perdue\n");
                     close(fd); fd = -1;
                 } else {
-                    printf("[INJECTOR] Symptomes reduits. Resolution complete = BT8 JoyPi (CMD PRES).\n");
+                    printf("[INJECTOR] Symptomes reduits. Resolution = BT7 (CMD REP1 temp) + BT8 (CMD REP2 stress).\n");
                 }
                 fflush(stdout);
                 continue;

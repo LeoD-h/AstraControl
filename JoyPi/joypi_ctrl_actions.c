@@ -11,6 +11,7 @@
 #include "joypi_ctrl_actions.h"
 #include "joypi_ctrl_net.h"
 #include "actuators.h"
+#include "ir_input.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +50,7 @@ static void password_backspace(ControllerState *st) {
         password_show(st);
     } else {
         printf("[ctrl] Saisie mot de passe annulée\n");
+        ir_disarm();
         st->mode = MODE_NORMAL;
         password_reset(st);
     }
@@ -154,6 +156,7 @@ static void handle_response_mel(const char *resp) {
 static void password_confirm(ControllerState *st) {
     if (strcmp(st->password_buf, PASSWORD_CORRECT) == 0) {
         printf("[ctrl] Mot de passe correct, lancement...\n");
+        ir_disarm();
         st->mode = MODE_NORMAL;
         password_reset(st);
         char resp[256];
@@ -256,23 +259,52 @@ static void action_bt6(ControllerState *st) {
         handle_response_mel(resp);
 }
 
+static void handle_response_rep1(ControllerState *st, const char *resp) {
+    if (strcmp(resp, "OK REP1_FIX") == 0) {
+        printf("[ctrl] PANNE 1 RESOLUE (temperature normalisee)\n");
+        st->fault1_active = false;
+        if (!st->fault2_active && !st->fault_active) cmd_pipe_write(st, "CLEAR_ALERTS\n");
+        actuator_led_set(2);
+        actuator_buzzer_bip();
+    } else if (strcmp(resp, "OK REP1_NONE") == 0) {
+        printf("[ctrl] BT7 : aucune panne temperature active\n");
+        actuator_buzzer_bip();
+    } else {
+        printf("[ctrl] Réponse inattendue (CMD REP1) : %s\n", resp);
+    }
+}
+
+static void handle_response_rep2(ControllerState *st, const char *resp) {
+    if (strcmp(resp, "OK REP2_FIX") == 0) {
+        printf("[ctrl] PANNE 2 RESOLUE (stress structurel reduit)\n");
+        st->fault2_active = false;
+        if (!st->fault1_active && !st->fault_active) cmd_pipe_write(st, "CLEAR_ALERTS\n");
+        actuator_led_set(2);
+        actuator_buzzer_bip();
+    } else if (strcmp(resp, "OK REP2_NONE") == 0) {
+        printf("[ctrl] BT8 : aucune panne stress active\n");
+        actuator_buzzer_bip();
+    } else {
+        printf("[ctrl] Réponse inattendue (CMD REP2) : %s\n", resp);
+    }
+}
+
 static void action_bt7(ControllerState *st) {
-    printf("[ctrl] BT7 : demande vitesse\n");
+    printf("[ctrl] BT7 : résolution panne temperature (CMD REP1)\n");
     char resp[256];
-    if (send_cmd_recv(st, "CMD ALT\n", resp, sizeof(resp)))
-        handle_response_alt(resp);
+    if (send_cmd_recv(st, "CMD REP1\n", resp, sizeof(resp)))
+        handle_response_rep1(st, resp);
+    else
+        actuator_buzzer_bip();
 }
 
 static void action_bt8(ControllerState *st) {
-    if (st->fault_active) {
-        printf("[ctrl] BT8 : résolution panne (CMD PRES)\n");
-        char resp[256];
-        if (send_cmd_recv(st, "CMD PRES\n", resp, sizeof(resp)))
-            handle_response_pres(st, resp);
-    } else {
-        printf("[ctrl] BT8 : aucune panne active — info carburant via télémétrie\n");
+    printf("[ctrl] BT8 : résolution panne stress (CMD REP2)\n");
+    char resp[256];
+    if (send_cmd_recv(st, "CMD REP2\n", resp, sizeof(resp)))
+        handle_response_rep2(st, resp);
+    else
         actuator_buzzer_bip();
-    }
 }
 
 /* ------------------------------------------------------------------ */

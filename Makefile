@@ -39,7 +39,8 @@ SRC_DATA_VM    = Dashboard/data_input_text.c Dashboard/data_gen_model.c Dashboar
 SRC_DASHBOARD  = Dashboard/main.c Dashboard/dashboard_logic.c Dashboard/dashboard_dynamics.c \
                  Dashboard/dashboard_visuals.c Dashboard/pipes.c
 SRC_CONTROLLER = JoyPi/joypi_controller.c JoyPi/joypi_ctrl_net.c JoyPi/joypi_ctrl_keys.c \
-                 JoyPi/joypi_ctrl_actions.c JoyPi/actuators.c JoyPi/actuators_display.c
+                 JoyPi/joypi_ctrl_actions.c JoyPi/actuators.c JoyPi/actuators_display.c \
+                 JoyPi/ir_input.c
 SRC_BTN_TEST   = JoyPi/hardware_buttons_test.c
 SRC_ACT_TEST   = JoyPi/hardware_actuators_test.c
 SRC_STOP_TEST  = JoyPi/hardware_stop.c

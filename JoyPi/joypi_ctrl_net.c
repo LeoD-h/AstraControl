@@ -239,7 +239,11 @@ static void handle_telemetry(ControllerState *st, const char *line) {
     }
 
     /* Vitesse temps réel sur le 7-segments */
-    if (speed[0]) actuator_segment_show(atoi(speed));
+    if (speed[0]) {
+        int spd = atoi(speed);
+        actuator_segment_show(spd);
+        st->last_speed = spd;
+    }
 
     /* Envoi données au dashboard */
     char msg[64];
@@ -282,10 +286,39 @@ static void handle_event(ControllerState *st, const char *event) {
         actuator_led_set(1);
         actuator_buzzer_melody_c();
 
+    } else if (strcmp(event, "PROBLEM1") == 0) {
+        printf("[ctrl] EVENT PROBLEM1 (temperature critique)\n");
+        st->fault1_active = true;
+        data_pipe_write(st, "PROBLEM ON\n");
+        actuator_led_set(1);
+        actuator_buzzer_melody_c();
+
+    } else if (strcmp(event, "PROBLEM2") == 0) {
+        printf("[ctrl] EVENT PROBLEM2 (stress structurel)\n");
+        st->fault2_active = true;
+        data_pipe_write(st, "PROBLEM ON\n");
+        actuator_led_set(1);
+        actuator_buzzer_melody_c();
+        actuator_buzzer_bip();
+
     } else if (strcmp(event, "RESOLVED") == 0) {
         printf("[ctrl] EVENT RESOLVED\n");
         st->fault_active = false;
         data_pipe_write(st, "PROBLEM OFF\n");
+        actuator_led_set(2);
+        actuator_buzzer_bip();
+
+    } else if (strcmp(event, "RESOLVED1") == 0) {
+        printf("[ctrl] EVENT RESOLVED1 (temperature normalisee)\n");
+        st->fault1_active = false;
+        if (!st->fault2_active) data_pipe_write(st, "PROBLEM OFF\n");
+        actuator_led_set(2);
+        actuator_buzzer_bip();
+
+    } else if (strcmp(event, "RESOLVED2") == 0) {
+        printf("[ctrl] EVENT RESOLVED2 (stress reduit)\n");
+        st->fault2_active = false;
+        if (!st->fault1_active) data_pipe_write(st, "PROBLEM OFF\n");
         actuator_led_set(2);
         actuator_buzzer_bip();
 
@@ -362,6 +395,8 @@ void state_init(ControllerState *st, const char *ip, int port) {
     st->password_buf[0]     = '\0';
     st->last_reconnect_attempt = 0;
     st->fault_active        = false;
+    st->fault1_active       = false;
+    st->fault2_active       = false;
     strncpy(st->sat_ip, ip, sizeof(st->sat_ip) - 1);
     st->sat_ip[sizeof(st->sat_ip) - 1] = '\0';
     st->sat_port = port;

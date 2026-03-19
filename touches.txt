@@ -26,8 +26,8 @@ Calcul numéro de touche :
   BT4   |  8  | pin37   | pin15   | DEMANDE TEMPÉRATURE (CMD TEMP → affiche sur 7-seg)
   BT5   | 11  | pin22   | pin29   | CYCLE PRESSION : PANNE → FIX → NOMINAL (CMD PRES)
   BT6   | 12  | pin37   | pin29   | MÉLODIE (cycle 1/2/3, CMD MEL n)
-  BT7   | 15  | pin22   | pin31   | VITESSE : affiche la dernière vitesse sur le 7-seg
-  BT8   | 16  | pin37   | pin31   | CARBURANT : affiche le dernier fuel sur le 7-seg
+  BT7   | 15  | pin22   | pin31   | RÉSOLUTION PANNE TEMPÉRATURE (CMD REP1)
+  BT8   | 16  | pin37   | pin31   | RÉSOLUTION PANNE STRESS STRUCTUREL (CMD REP2)
 
 ================================================================================
  TOUCHES SPÉCIALES EN MODE MOT DE PASSE (colonnes pin33 et pin35)
@@ -68,7 +68,22 @@ Note : la lecture des directions se fait en basculant les colonnes en INPUT
 
   La saisie du mot de passe peut aussi se faire via la télécommande IR.
   Les touches IR sont mappées sur les chiffres 0-9, OK=confirmer, *=effacer.
-  Voir : JoyPi/joypi_ir_test.c pour le test du capteur.
+  Voir : JoyPi/ir_input.c — codes NEC 32 bits (à calibrer sur matériel réel).
+
+  Pin IR : physical pin 11 (GPIO 17) — PARTAGÉ avec LED rouge (servo droit 2).
+  La LED rouge et l'IR ne peuvent pas être actifs simultanément.
+  ir_arm()    : pin 11 → INPUT  (en mode saisie mot de passe)
+  ir_disarm() : pin 11 → OUTPUT (hors mode mot de passe, LED disponible)
+
+  Codes NEC télécommande JoyPi par défaut (à calibrer sur matériel) :
+    0 → 0x00FF6897    1 → 0x00FF30CF    2 → 0x00FF18E7
+    3 → 0x00FF7A85    4 → 0x00FF10EF    5 → 0x00FF38C7
+    6 → 0x00FF5AA5    7 → 0x00FF42BD    8 → 0x00FF4AB5
+    9 → 0x00FF52AD    OK (CONF)  → 0x00FF02FD
+                      *  (BACK)  → 0x00FF22DD
+
+  Procédure calibration : lancer bin-proto/joypi_ir_test sur JoyPi,
+  appuyer chaque touche, relever le code hex, mettre à jour ir_input.c.
 
 ================================================================================
  RÉSUMÉ DES 8 TÂCHES (touches 3,4,7,8,11,12,15,16)
@@ -78,9 +93,9 @@ Note : la lecture des directions se fait en basculant les colonnes en INPUT
   Touche  4  → Tâche 2 : Atterrissage d'urgence
   Touche  7  → Tâche 3 : Consultation altitude (affichage 7-seg)
   Touche  8  → Tâche 4 : Consultation température (affichage 7-seg)
-  Touche 11  → Tâche 5 : Gestion pression (cycle 3 états)
+  Touche 11  → Tâche 5 : Gestion pression (cycle 3 états : panne → fix → nominal)
   Touche 12  → Tâche 6 : Test mélodie buzzer (cycle 3 mélodies)
-  Touche 15  → Tâche 7 : Consultation vitesse (affichage 7-seg)
-  Touche 16  → Tâche 8 : Consultation carburant (affichage 7-seg)
+  Touche 15  → Tâche 7 : Résolution panne température (CMD REP1)
+  Touche 16  → Tâche 8 : Résolution panne stress structurel (CMD REP2)
 
 ================================================================================

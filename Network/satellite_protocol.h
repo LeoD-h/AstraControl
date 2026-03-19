@@ -14,6 +14,8 @@
  *   CMD TEMP\n              -> DATA TEMP <v>\n
  *   CMD PRES\n              -> OK PRES_FAULT\n | OK PRES_FIX\n | OK PRES_OK\n
  *   CMD MEL <1|2|3>\n       -> OK MEL <n>\n
+ *   CMD REP1\n              -> OK REP1_FIX\n | OK REP1_NONE\n
+ *   CMD REP2\n              -> OK REP2_FIX\n | OK REP2_NONE\n
  *
  * Protocole controle_fusee_data -> Satellite :
  *   AUTH INJECTOR\n         -> AUTH_OK\n
@@ -29,9 +31,12 @@
  *   TELEMETRY alt=<v> speed=<v> fuel=<v> temp=<v> pressure=<v> thrust=<v> state=<STATE>\n
  *   EVENT LAUNCH\n | EVENT LAND\n | EVENT LAND_AUTO\n | EVENT LANDED\n
  *   EVENT PROBLEM\n | EVENT RESOLVED\n | EVENT MEL <n>\n
+ *   EVENT PROBLEM1\n | EVENT PROBLEM2\n
+ *   EVENT RESOLVED1\n | EVENT RESOLVED2\n
  *
  * Push Satellite -> controle_fusee_data (INJECTOR) :
  *   CMD_EVENT LAUNCH\n | CMD_EVENT LAND\n | CMD_EVENT PAUSE\n | CMD_EVENT RESUME\n
+ *   CMD_EVENT FIX_TEMP\n | CMD_EVENT FIX_STRESS\n
  *
  * Auteurs     : Léo, Inès, Juliann
  * Date        : 12/03/2026
@@ -75,6 +80,8 @@ typedef struct {
     SatRocketState  state;
     bool            pressure_fault;
     bool            pressure_corrector;
+    bool            fault1_active;    /* panne 1 : temperature critique */
+    bool            fault2_active;    /* panne 2 : stress structurel    */
 } SatTelemetry;
 
 /* Retourne le nom lisible d'un etat fusee. */

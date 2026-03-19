@@ -61,6 +61,10 @@ void gen_on_event(GenModel *gm, const char *event) {
         if (gm->launched && gm->speed_kmh > 700.0) gm->stress += 1.2;
     } else if (!strcmp(event, "FIX_PROBLEM")) {
         gen_reset_to_ground(gm);
+    } else if (!strcmp(event, "FIX_TEMP")) {
+        gm->temp_c = 20.0;
+    } else if (!strcmp(event, "FIX_STRESS")) {
+        gm->stress = 0.0;
     }
 }
 

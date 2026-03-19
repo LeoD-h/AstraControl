@@ -1,6 +1,6 @@
 # Task List — Projet Fusée JoyPi/VM
 
-## Statut global : VALIDÉ — BUILD 0 WARNING 0 ERREUR
+## Statut global : VALIDÉ — BUILD 0 WARNING 0 ERREUR — AUDIT 3 AGENTS PASSÉ (19/03/2026)
 
 ---
 
@@ -73,10 +73,14 @@ JoyPi (10.91.241.75)
 - Binaire : `To-VM/bin-util/controle_fusee`
 - Compilation : `gcc ... -lncurses`
 
-### 8. Tâche 8 remplacée — BT8 résout la panne
-- Ancien : tâche "carburant" inerte
-- Nouveau : BT8 = résolution panne si `fault_active == true` (CMD PRES)
-- Sinon : bip info (pas de panne active)
+### 8. BT7/BT8 — résolution pannes (REP1/REP2)
+- BT7 (touch 15) → `CMD REP1` → résolution panne température (fault1)
+  - `OK REP1_FIX` : clear `fault1_active`, LED verte, bip
+  - `OK REP1_NONE` : bip (pas de panne temp active)
+- BT8 (touch 16) → `CMD REP2` → résolution panne stress structurel (fault2)
+  - `OK REP2_FIX` : clear `fault2_active`, LED verte, bip
+  - `OK REP2_NONE` : bip (pas de panne stress active)
+- `CLEAR_ALERTS` envoyé au pipe seulement si les deux pannes sont résolues
 
 ### 9. hardware_actuators_test mis à jour
 - `test_servos()` : alterne LED verte/rouge 4 fois
@@ -133,31 +137,51 @@ JoyPi (10.91.241.75)
 
 ---
 
+### 12. Descente forcée en cas de panne (dashboard_dynamics.c)
+- Panne active (`problem_active`) → perte poussée : speed -20/tick, altitude -18/tick, flame_size=1
+- Carburant continue de diminuer (fuite)
+- Comportement réaliste : la fusée descend si panne non résolue
+
+### 14. Corrections round 4 (audit 3 agents, 19/03/2026)
+- `dashboard_dynamics.c:103` : `problem_active=false` + `alerts[2]=false` au touchdown
+- `satellite_handler.c:52` : `push_telemetry()` buf 256 → 512 (format-truncation)
+- `joypi_controller.c:101-109` : messages d'affichage BT7/BT8 → REP1/REP2
+- `joypi_controller.c:41-42` : commentaire "NON DISPONIBLES" supprimé (pin22/33 bien scannées)
+- `joypi_controller.h:34-38` : commentaire colonnes corrigé (mapping réel COL_PINS)
+- `joypi_controller.h:44-45` : commentaires KEY_BT7/KEY_BT8 mis à jour
+- `ir_input.c:34-35` : `#define KEY_CONFIRM/KEY_BACKSPACE` supprimés → inclus depuis `joypi_controller.h`
+- `joypi_ctrl_net.c:397` : `state_init()` initialise explicitement `fault1_active/fault2_active`
+- `joypi_ctrl_keys.c:116-124` : `ir_arm()`/`ir_disarm()` sur transition de mode uniquement (non plus chaque cycle)
+- `data_input_text.c:348` : message `resolve` corrigé (CMD PRES → CMD REP1/REP2)
+- `touches.txt` : BT7/BT8 + IR codes + résumé 8 tâches entièrement mis à jour
+
+### 13. Infrarouge — intégré dans joypi_ctrl_keys.c
+- `JoyPi/ir_input.c` + `ir_input.h` créés : API `ir_arm()`, `ir_disarm()`, `ir_poll()`
+- `ir_poll()` non-bloquant → retourne code touche IR ou 0
+- Intégration dans `scan_keys()` : actif uniquement en `MODE_PASSWORD`
+- Codes IR par défaut (à calibrer sur hardware) : 0..9 → saisie mdp, 0x1C=CONF, 0x1D=BACK
+
 ## STATUT INFRAROUGE
 
-**Non intégré dans cette session.**
-- `JoyPi/joypi_ir_test.c` : test standalone IR NEC (simulation + hardware)
-- `JoyPi/joypi_hardware_button.c` : API hw_button_init/scan
-- Non connectés au flux contrôleur principal
-- Restent à calibrer (codes IR réels) et intégrer (ir_input.c)
+**Intégré — en attente de calibration hardware.**
+- `ir_input.c` connecté à `joypi_ctrl_keys.c` → actif en mode mot de passe
+- `joypi_ir_test.c` : test standalone (simulation stdin + hardware)
+- **Reste à faire** : lancer `joypi_ir_test` sur JoyPi, relever les vrais codes hex, mettre à jour `ir_input.c`
 
 ---
 
 ## RESTE À FAIRE
 
 ### Priorité HAUTE
-- [ ] **Intégrer IR** : connecter joypi_ir_test.c au flux mot de passe
-  - `ir_poll()` non-bloquant → `handle_key_password()` en mode PASSWORD
-  - Créer `JoyPi/ir_input.c`
-- [ ] **Calibrer codes IR** : lancer `joypi_ir_test` sur JoyPi, noter vrais codes
+- [ ] **Calibrer codes IR** : lancer `bin-proto/joypi_ir_test` sur JoyPi, noter codes hex réels, mettre à jour `ir_input.c`
+- [ ] **Déployer et tester** : copier `To-JoyPI/` sur JoyPi (`scp -r To-JoyPI/ pi@10.91.241.75:~/Desktop/`), séquence complète ci-dessous
 
 ### Priorité MOYENNE
-- [ ] **Déployer et tester** : `make sjoypi` puis séquence de test complète
-- [ ] **Vérifier LCD** : connecté physiquement ? réactiver ou confirmer désactivé
-- [ ] **Tâche 7 (BT7)** : envisager CMD SPEED dédié (option A) ou garder télémétrie
+- [x] **CMD REP1/REP2 côté serveur** : `satellite_handler.c:193-217` OK ✓
+- [ ] **Vérifier LCD** : connecté physiquement ? `actuators_display.c` a le code prêt ; réactiver si branché
 
 ### Priorité BASSE
-- [ ] **Documenter codes IR réels** dans touches.txt après calibration
+- [ ] **Documenter codes IR réels** dans `touches.txt` après calibration hardware
 
 ---
 
@@ -190,9 +214,11 @@ cd ~/Desktop/To-JoyPI
 8. Appuyer BT3 (touch 7) → altitude sur 7-seg
 9. Joystick UP → fusée monte dans dashboard ncurses
 10. Joystick RIGHT → fusée dérive à droite
-11. `fault` dans controle_fusee_data → EVENT PROBLEM → LED rouge + mélodie C
-12. BT8 (touch 16) → CMD PRES résolution → LED verte + bip
-13. BT2 (touch 4) → atterrissage urgence → LED rouge + mélodie B
+11. `fault` dans controle_fusee_data → EVENT PROBLEM → LED rouge + mélodie C + descente forcée
+12. BT7 (touch 15) → CMD REP1 → résolution panne température → LED verte + bip
+13. BT8 (touch 16) → CMD REP2 → résolution panne stress → LED verte + bip
+14. Mot de passe via IR télécommande : entrer 0..9, CONF (0x1C), BACK (0x1D)
+15. BT2 (touch 4) → atterrissage urgence → LED rouge + mélodie B
 
 ### Test moteur/servos
 ```bash
@@ -206,7 +232,15 @@ cd ~/Desktop/To-JoyPI/bin-proto
 ## BUILD
 
 ```
-make all   → 0 warning, 0 erreur (validé 18/03/2026)
+make all   → 0 warning, 0 erreur (validé 19/03/2026 — audit 3 agents)
 make vm    → To-VM/  (5 binaires : satellite x86+ARM, data x86+ARM, dashboard x86)
 make joypi → To-JoyPI/ (dashboard ARM, controller ARM, tests)
 ```
+
+### Fichiers nouveaux (session 19/03/2026)
+- `JoyPi/ir_input.c` + `ir_input.h` — API IR non-bloquante intégrée au contrôleur
+- `joypi_ctrl_actions.c` : `handle_response_rep1/rep2` + `action_bt7/bt8` → CMD REP1/REP2
+- `joypi_ctrl_actions.c` : `CLEAR_ALERTS` vérifie maintenant les 3 flags `!fault1 && !fault2 && !fault_active`
+- `joypi_ctrl_keys.c` : intégration `ir_arm/ir_poll` en mode PASSWORD
+- `Dashboard/dashboard_dynamics.c` : descente forcée si `problem_active`
+- `Makefile` : `ir_input.c` ajouté à `SRC_CONTROLLER`

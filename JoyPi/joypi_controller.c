@@ -37,8 +37,7 @@ volatile int g_stop = 0;
 
 #ifdef USE_WIRINGPI
 const int ROW_PINS[4] = {13, 15, 29, 31};
-/* Colonnes : pin 37 et 35 disponibles. Pin 22 et 33 NON DISPONIBLES.
- * La matrice est donc limitée aux colonnes 37 et 35 sur ce matériel. */
+/* Colonnes : toutes disponibles, partagées avec joystick (gérées par read_direction). */
 const int COL_PINS[4] = {37, 22, 35, 33};
 #endif
 
@@ -98,15 +97,14 @@ int main(int argc, char **argv) {
 #ifdef USE_WIRINGPI
     setup_gpio();
     printf("[ctrl] Mode GPIO réel (wiringPi, physique)\n");
-    printf("[ctrl] Rows: 13,15,29,31  |  Cols: 37,(22),35,(33)\n");
-    printf("[ctrl] ATTENTION: pin 22 et 33 NON DISPONIBLES\n");
+    printf("[ctrl] Rows: 13,15,29,31  |  Cols: 37,22,35,33 (partagés joystick)\n");
     printf("[ctrl] BT1(3)=LAUNCH BT2(4)=LAND BT3(7)=ALT BT4(8)=TEMP\n");
-    printf("[ctrl] BT5(11)=PRES BT6(12)=MEL BT7(15)=SPD BT8(16)=FAULT\n");
+    printf("[ctrl] BT5(11)=PRES BT6(12)=MEL BT7(15)=REP1 BT8(16)=REP2\n");
     printf("[ctrl] DIR UP/DOWN/LEFT/RIGHT → commandes dashboard ncurses\n");
 #else
     actuator_init();
     printf("[ctrl] Mode simulation clavier\n");
-    printf("[ctrl] 1=LAUNCH 2=LAND 3=ALT 4=TEMP 5=PRES 6=MEL 7=SPD 8=FAULT\n");
+    printf("[ctrl] 1=LAUNCH 2=LAND 3=ALT 4=TEMP 5=PRES 6=MEL 7=REP1 8=REP2\n");
     printf("[ctrl] u/d/r/l=directions  q=quitter\n");
 #endif
 

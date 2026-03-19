@@ -17,6 +17,7 @@
 #include "joypi_ctrl_keys.h"
 #include "joypi_ctrl_actions.h"
 #include "joypi_ctrl_net.h"
+#include "ir_input.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -110,6 +111,19 @@ void scan_buttons_and_handle(ControllerState *st) {
         g_prev_dir_down  = dir_down;
         g_prev_dir_right = dir_right;
         g_prev_dir_left  = dir_left;
+    }
+
+    /* IR télécommande — arm/disarm sur transition de mode uniquement */
+    {
+        static int prev_mode = MODE_NORMAL;
+        if (st->mode == MODE_PASSWORD) {
+            if (prev_mode != MODE_PASSWORD) ir_arm();
+            int ir_key = ir_poll();
+            if (ir_key != 0) handle_key(st, ir_key);
+        } else if (prev_mode == MODE_PASSWORD) {
+            ir_disarm();
+        }
+        prev_mode = st->mode;
     }
 
     usleep(POLL_TIMEOUT_MS * 1000U);
