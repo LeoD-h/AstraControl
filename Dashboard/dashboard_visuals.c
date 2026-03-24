@@ -49,48 +49,54 @@ static void draw_flame(int y, int x, int size) {
 
 static void draw_rocket(int y, int x, int tilt, int sim_offset, int flame_size, bool exploded) {
     static const char *rocket_straight[] = {
-        "             /\\",
-        "            /  \\",
-        "           / /\\ \\",
-        "          / /  \\ \\",
-        "         /_/____\\_\\",
-        "         |  NASA  |",
-        "         |   ||   |",
-        "         |  [##]  |",
-        "         |   ||   |",
-        "         |  [##]  |",
-        "         |   ||   |",
-        "        /|_________|\\",
-        "       /_|  /   \\  |_\\",
-        "         /__/     \\__\\",
-        "           /_/ \\_\\",
-        "            /_/\\_\\",
-        "             /_\\",
-        "            _/ \\_",
-        "           /_____\\",
-        "            |||",
-        "           |||||",
-        "          |||||||",
-        "         ||| |||",
-        "          |||||",
-        "           |||",
-        "            |"
+        "                 /\\",
+        "                /  \\",
+        "               / /\\ \\",
+        "              / /  \\ \\",
+        "             / / /\\ \\ \\",
+        "            /_/ /  \\ \\_\\",
+        "            |  /____\\  |",
+        "            |   NASA   |",
+        "            |    ||    |",
+        "            |   [##]   |",
+        "            |    ||    |",
+        "            |   [##]   |",
+        "            |    ||    |",
+        "            |   [##]   |",
+        "            |    ||    |",
+        "           /|__________|\\",
+        "          /_|  / || \\  |_\\",
+        "            | /  ||  \\ |",
+        "            |/___||___\\|",
+        "              /  ||  \\",
+        "             /___||___\\",
+        "                /\\",
+        "               /  \\",
+        "              /____\\",
+        "               ||||",
+        "              ||||||",
+        "             ||||||||",
+        "            ||| || |||",
+        "              ||||||",
+        "               ||||"
     };
 
     int shift = (tilt < 0) ? -2 : ((tilt > 0) ? 2 : 0);
-    int draw_x = x + shift + sim_offset;
+    int body_offset = sim_offset;
+    int flame_offset = 0;
+    int draw_x = x + shift + body_offset;
     if (draw_x < 0) {
         draw_x = 0;
     }
 
     attron(COLOR_PAIR(exploded ? 5 : 2));
-    for (int i = 0; i < 26; ++i) {
+    for (int i = 0; i < 30; ++i) {
         mvprintw(y + i, draw_x, "%s", rocket_straight[i]);
     }
     attroff(COLOR_PAIR(exploded ? 5 : 2));
 
     if (!exploded) {
-        draw_flame(y + 26, draw_x + 10, flame_size);
+        draw_flame(y + 30, draw_x + 13 + flame_offset, flame_size);
     } else {
         attron(COLOR_PAIR(5) | A_BOLD);
         mvprintw(y + 10, draw_x + 25, "*** BOOM ***");
@@ -119,8 +125,8 @@ static void draw_center_alert_popup(const RocketState *st, int rows, int cols) {
         return;
     }
 
-    int w = 48;
-    int h = 7;
+    int w = 52;
+    int h = 9;
     int y = (rows - h) / 2;
     int x = (cols - w) / 2;
 
@@ -130,10 +136,14 @@ static void draw_center_alert_popup(const RocketState *st, int rows, int cols) {
     }
     mvprintw(y + 1, x + 2, "!!! ALERTE CRITIQUE MISSION !!!");
     mvprintw(y + 3, x + 2, "A1:%s  A2:%s  A3:%s",
-             st->alerts[0] ? "ON" : "OFF",
-             st->alerts[1] ? "ON" : "OFF",
-             st->alerts[2] ? "ON" : "OFF");
-    mvprintw(y + 5, x + 2, "Verifier guidage / carburant / G-load");
+             st->alerts[0] ? "ON " : "OFF",
+             st->alerts[1] ? "ON " : "OFF",
+             st->alerts[2] ? "ON " : "OFF");
+    mvprintw(y + 4, x + 2, "F1(TEMP):%s  F2(STRESS):%s",
+             st->fault1_display ? "ACTIVE" : "OFF   ",
+             st->fault2_display ? "ACTIVE" : "OFF   ");
+    mvprintw(y + 6, x + 2, "BT7=repare temp  BT8=repare stress");
+    mvprintw(y + 7, x + 2, "Verifier carburant / pannes");
     attroff(A_BOLD | COLOR_PAIR(5));
 }
 
@@ -178,13 +188,18 @@ static void draw_launch_password_popup(const RocketState *st, int rows, int cols
 }
 
 void draw_dashboard(const RocketState *st, int rows, int cols, const char *cmd_pipe, const char *data_pipe) {
+    (void)cmd_pipe;
+    (void)data_pipe;
+    const char *mode = st->exploded ? "LOSS"
+                       : st->landing ? "LANDING"
+                       : (st->launched && st->altitude >= 100000) ? "ORBIT"
+                       : st->launched ? "ASCENT"
+                       : "READY";
     attron(A_BOLD | COLOR_PAIR(1));
-    mvprintw(0, 2, "MISSION DASHBOARD | MODE: %s | CMD=%s | DATA=%s",
-             st->exploded ? "LOSS" : (st->landing ? "LANDING" : (st->launched ? "ASCENT" : "READY")),
-             cmd_pipe, data_pipe);
+    mvprintw(0, 2, "MISSION DASHBOARD | MODE: %s", mode);
     attroff(A_BOLD | COLOR_PAIR(1));
 
-    draw_rocket(2, 2, st->tilt, st->sim_offset, st->flame_size, st->exploded);
+    draw_rocket(2, (cols / 2) - 24, st->tilt, st->sim_offset, st->flame_size, st->exploded);
     draw_logo(rows - 9, 2);
 
     int px = cols - 58;
@@ -209,29 +224,43 @@ void draw_dashboard(const RocketState *st, int rows, int cols, const char *cmd_p
     mvprintw(y + 14, px + 1, "Attitude P/Y/R   : %3d / %3d / %3d deg", st->pitch, st->yaw, st->roll);
     mvprintw(y + 15, px + 1, "Apo/Peri Est.    : %6d / %6d m", st->apogee, st->periapsis);
     mvprintw(y + 16, px + 1, "Inclinaison cmd  : %s", st->tilt < 0 ? "LEFT" : (st->tilt > 0 ? "RIGHT" : "STRAIGHT"));
-    mvprintw(y + 17, px + 1, "Sim flight       : %s", st->sim_flight ? "ON" : "OFF");
 
-    draw_bar(y + 18, px + 1, "Fuel", st->fuel, 100, 28, st->fuel < 20 ? 5 : 4);
-    mvprintw(y + 18, px + 40, "%3d %%", st->fuel);
-    draw_bar(y + 19, px + 1, "Thermal", st->temperature, 120, 28, st->temperature > 95 ? 5 : 3);
-    mvprintw(y + 19, px + 40, "%3d C", st->temperature);
+    draw_bar(y + 17, px + 1, "Fuel", st->fuel, 100, 28, st->fuel < 20 ? 5 : 4);
+    mvprintw(y + 17, px + 40, "%3d %%", st->fuel);
+    draw_bar(y + 18, px + 1, "Thermal", st->temperature, 120, 28, st->temperature > 95 ? 5 : 3);
+    mvprintw(y + 18, px + 40, "%3d C", st->temperature);
 
     attron(COLOR_PAIR(1));
-    mvhline(y + 21, px, '-', 56);
-    mvprintw(y + 22, px + 1, "ALERT MATRIX");
-    mvhline(y + 23, px, '-', 56);
+    mvhline(y + 20, px, '-', 56);
+    mvprintw(y + 21, px + 1, "ALERT MATRIX");
+    mvhline(y + 22, px, '-', 56);
     attroff(COLOR_PAIR(1));
 
-    mvprintw(y + 24, px + 1, "A1 LOW FUEL      : %s", st->alerts[0] ? "ACTIVE" : "OFF");
-    mvprintw(y + 25, px + 1, "A2 HIGH G LOAD   : %s", st->alerts[1] ? "ACTIVE" : "OFF");
-    mvprintw(y + 26, px + 1, "A3 GUIDANCE FAIL : %s", st->alerts[2] ? "ACTIVE" : "OFF");
+    mvprintw(y + 23, px + 1, "A1 LOW FUEL      : %s", st->alerts[0] ? "ACTIVE" : "OFF");
+    mvprintw(y + 24, px + 1, "A2 HIGH G LOAD   : %s", st->alerts[1] ? "ACTIVE" : "OFF");
+    mvprintw(y + 25, px + 1, "A3 GUIDANCE FAIL : %s", st->alerts[2] ? "ACTIVE" : "OFF");
+
+    if (st->fault1_display) {
+        attron(COLOR_PAIR(5) | A_BOLD);
+        mvprintw(y + 26, px + 1, "F1 TEMP CRIT     : ACTIVE");
+        attroff(COLOR_PAIR(5) | A_BOLD);
+    } else {
+        mvprintw(y + 26, px + 1, "F1 TEMP CRIT     : OFF");
+    }
+    if (st->fault2_display) {
+        attron(COLOR_PAIR(5) | A_BOLD);
+        mvprintw(y + 27, px + 1, "F2 STRESS STRUCT : ACTIVE");
+        attroff(COLOR_PAIR(5) | A_BOLD);
+    } else {
+        mvprintw(y + 27, px + 1, "F2 STRESS STRUCT : OFF");
+    }
 
     if (st->melody_test > 0) {
         attron(COLOR_PAIR(3) | A_BOLD);
-        mvprintw(y + 28, px + 1, "AUDIO TEST       : MELODY-%d RUNNING", st->melody_test);
+        mvprintw(y + 29, px + 1, "AUDIO TEST       : MELODY-%d RUNNING", st->melody_test);
         attroff(COLOR_PAIR(3) | A_BOLD);
     } else {
-        mvprintw(y + 28, px + 1, "AUDIO TEST       : IDLE");
+        mvprintw(y + 29, px + 1, "AUDIO TEST       : IDLE");
     }
 
     if (st->alerts[0] || st->alerts[1] || st->alerts[2] || st->exploded) {
@@ -245,8 +274,6 @@ void draw_dashboard(const RocketState *st, int rows, int cols, const char *cmd_p
     }
 
     mvprintw(rows - 4, px + 1, "Last event: %s", st->last_event);
-    mvprintw(rows - 3, px + 1, "Control UI: ./controle_fusee_control | Data UI: ./controle_fusee_data");
-    mvprintw(rows - 1, px + 1, "Socket bridge: ./socket_bridge_server 5555");
 
     draw_center_alert_popup(st, rows, cols);
     draw_launch_password_popup(st, rows, cols);

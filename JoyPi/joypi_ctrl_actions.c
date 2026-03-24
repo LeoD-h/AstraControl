@@ -22,9 +22,12 @@
 /* Mot de passe                                                        */
 /* ------------------------------------------------------------------ */
 
+static void password_confirm(ControllerState *st);
+
 static void password_reset(ControllerState *st) {
     memset(st->password_buf, 0, sizeof(st->password_buf));
     st->password_len = 0;
+    cmd_pipe_write(st, "PASSRESET\n");
 }
 
 static void password_show(ControllerState *st) {
@@ -41,12 +44,16 @@ static void password_add_char(ControllerState *st, char c) {
     if (st->password_len >= PASSWORD_MAX_LEN) return;
     st->password_buf[st->password_len++] = c;
     st->password_buf[st->password_len]   = '\0';
+    cmd_pipe_write(st, "PASSCHAR\n");
     password_show(st);
+    if (st->password_len == 3)
+        password_confirm(st);
 }
 
 static void password_backspace(ControllerState *st) {
     if (st->password_len > 0) {
         st->password_buf[--st->password_len] = '\0';
+        cmd_pipe_write(st, "PASSBACK\n");
         password_show(st);
     } else {
         printf("[ctrl] Saisie mot de passe annulée\n");
@@ -61,14 +68,12 @@ static void password_backspace(ControllerState *st) {
 /* ------------------------------------------------------------------ */
 
 static void handle_response_launch(ControllerState *st, const char *resp) {
+    (void)st;
     if (strcmp(resp, "OK LAUNCH") == 0) {
-        printf("[ctrl] LANCEMENT OK\n");
-        cmd_pipe_write(st, "LAUNCH_OK\n");
-        cmd_pipe_write(st, "SIM_FLIGHT ON\n");
-        actuator_led_green_blink(5);
-        actuator_led_set(2);
-        actuator_matrix_launch();
-        actuator_buzzer_melody_a();
+        /* Le satellite va broadcaster EVENT LAUNCH → handle_event s'occupe
+         * des actuateurs (LED, matrice, mélodie) et de LAUNCH_OK pipe.
+         * On ne fait rien ici pour éviter la double exécution bloquante. */
+        printf("[ctrl] CMD LU accepté — EVENT LAUNCH attendu du satellite\n");
     } else if (strcmp(resp, "FAIL ALREADY_LAUNCHED") == 0) {
         printf("[ctrl] ECHEC lancement : déjà en vol\n");
         actuator_led_set(1);
@@ -86,9 +91,13 @@ static void handle_response_land(ControllerState *st, const char *resp) {
     if (strcmp(resp, "OK LAND") == 0) {
         printf("[ctrl] ATTERRISSAGE OK\n");
         cmd_pipe_write(st, "LAND\n");
-        actuator_led_red_on();
+        actuator_led_green_blink(4);
         actuator_matrix_emergency();
-        actuator_buzzer_melody_b();
+        actuator_buzzer_bip();
+    } else if (strcmp(resp, "FAIL NOT_IN_ORBIT") == 0) {
+        printf("[ctrl] ECHEC atterrissage : orbite non atteinte\n");
+        actuator_led_set(1);
+        actuator_buzzer_bip();
     } else if (strcmp(resp, "FAIL NOT_FLYING") == 0) {
         printf("[ctrl] ECHEC atterrissage : pas en vol\n");
         actuator_led_set(1);
@@ -102,7 +111,7 @@ static void handle_response_alt(const char *resp) {
     if (strncmp(resp, "DATA ALT ", 9) == 0) {
         int val = atoi(resp + 9);
         printf("[ctrl] ALTITUDE: %d m\n", val);
-        actuator_segment_show(val);
+        actuator_segment_show(val / 1000);
     } else {
         printf("[ctrl] Réponse inattendue (CMD ALT) : %s\n", resp);
     }
@@ -125,11 +134,12 @@ static void handle_response_pres(ControllerState *st, const char *resp) {
         st->fault_active = true;
         data_pipe_write(st, "PROBLEM ON\n");
         actuator_led_set(1);
-        actuator_buzzer_melody_c();
+        actuator_buzzer_bip();
     } else if (strcmp(resp, "OK PRES_FIX") == 0) {
         printf("[ctrl] PRESSION : correcteur activé\n");
-        cmd_pipe_write(st, "FIX_PROBLEM\n");
         data_pipe_write(st, "PROBLEM OFF\n");
+        cmd_pipe_write(st, "CLEAR_ALERTS\n");
+        st->fault_active = false;
         actuator_buzzer_bip();
     } else if (strcmp(resp, "OK PRES_OK") == 0) {
         printf("[ctrl] PRESSION : nominale\n");
@@ -158,6 +168,7 @@ static void password_confirm(ControllerState *st) {
         printf("[ctrl] Mot de passe correct, lancement...\n");
         ir_disarm();
         st->mode = MODE_NORMAL;
+        st->explosion_notified = false;
         password_reset(st);
         char resp[256];
         if (send_cmd_recv(st, "CMD LU\n", resp, sizeof(resp))) {
@@ -197,7 +208,10 @@ static void action_bt1(ControllerState *st) {
 #ifdef USE_WIRINGPI
     printf("[ctrl] BT1 : entrée mode saisie mot de passe\n");
     st->mode = MODE_PASSWORD;
+    st->explosion_notified = false;
     password_reset(st);
+    ir_arm();
+    cmd_pipe_write(st, "LAUNCH\n");  /* déclenche popup mot de passe dans controle_fusee */
     printf("[ctrl] MDP: [        ] CONF=touche13  BACK=touche14\n");
     fflush(stdout);
 #else
@@ -231,15 +245,19 @@ static void action_bt2(ControllerState *st) {
 static void action_bt3(ControllerState *st) {
     printf("[ctrl] BT3 : demande altitude\n");
     char resp[256];
-    if (send_cmd_recv(st, "CMD ALT\n", resp, sizeof(resp)))
+    if (send_cmd_recv(st, "CMD ALT\n", resp, sizeof(resp))) {
         handle_response_alt(resp);
+        st->seg_override = false;
+    }
 }
 
 static void action_bt4(ControllerState *st) {
     printf("[ctrl] BT4 : demande température\n");
     char resp[256];
-    if (send_cmd_recv(st, "CMD TEMP\n", resp, sizeof(resp)))
+    if (send_cmd_recv(st, "CMD TEMP\n", resp, sizeof(resp))) {
         handle_response_temp(resp);
+        st->seg_override = true;  /* affichage reste jusqu'au prochain bouton */
+    }
 }
 
 static void action_bt5(ControllerState *st) {
@@ -250,12 +268,13 @@ static void action_bt5(ControllerState *st) {
 }
 
 static void action_bt6(ControllerState *st) {
+    /* Cycle mélodies 1→2→3→1 à chaque pression */
     st->melody_idx = (st->melody_idx % 3) + 1;
-    printf("[ctrl] BT6 : mélodie %d\n", st->melody_idx);
-    char cmd[32];
-    snprintf(cmd, sizeof(cmd), "CMD MEL %d\n", st->melody_idx);
+    printf("[ctrl] BT6 : mélodie test %d\n", st->melody_idx);
+    char cmd_buf[32];
+    snprintf(cmd_buf, sizeof(cmd_buf), "CMD MEL %d\n", st->melody_idx);
     char resp[256];
-    if (send_cmd_recv(st, cmd, resp, sizeof(resp)))
+    if (send_cmd_recv(st, cmd_buf, resp, sizeof(resp)))
         handle_response_mel(resp);
 }
 
@@ -312,6 +331,10 @@ static void action_bt8(ControllerState *st) {
 /* ------------------------------------------------------------------ */
 
 static void handle_key_normal(ControllerState *st, int key_num) {
+    /* Tout bouton sauf BT3/BT4 libère le verrou affichage 7-seg */
+    if (key_num != KEY_BT3 && key_num != KEY_BT4)
+        st->seg_override = false;
+
     switch (key_num) {
         case KEY_BT1: action_bt1(st); break;
         case KEY_BT2: action_bt2(st); break;

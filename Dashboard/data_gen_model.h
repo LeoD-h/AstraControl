@@ -26,6 +26,13 @@ typedef struct {
     double pressure_hpa;
     double thrust_kn;
     double stress;
+    bool fault1_active;
+    bool fault2_active;
+    double fault1_elapsed_s;
+    double fault2_elapsed_s;
+    double ascent_elapsed_s;
+    double landing_elapsed_s;
+    double landing_start_fuel_pct;
     unsigned long long last_tick_ms;
     unsigned long long last_emit_ms;
 } GenModel;

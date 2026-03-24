@@ -12,8 +12,14 @@
 
 #include <ctype.h>
 #include <curses.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#define AUTH_PIPE "/tmp/rocket_auth.pipe"
 
 static void uppercase_inplace(char *s) {
     for (; *s; ++s) {
@@ -43,12 +49,18 @@ static void reset_for_relaunch(RocketState *st) {
     st->sim_dir = 1;
     st->sim_tick = 0;
     st->flame_size = 0;
+    st->fault1_display = false;
+    st->fault2_display = false;
     st->launch_auth_popup = false;
     st->launch_auth_ok = false;
     st->launch_auth_result_ticks = 0;
     st->launch_passlen = 0;
     st->launch_passbuf[0] = '\0';
     st->mission_ms = 0;
+    st->fault1_since_ms = 0;
+    st->fault2_since_ms = 0;
+    st->landing_start_fuel = 0;
+    st->last_telemetry_ms = -100000;
 }
 
 void init_state(RocketState *st) {
@@ -61,6 +73,7 @@ void init_state(RocketState *st) {
     st->g_force = 1.0f;
     st->sim_dir = 1;
     st->flame_size = 0;
+    st->last_telemetry_ms = -100000;
     snprintf(st->last_event, sizeof(st->last_event), "Awaiting launch command");
 }
 
@@ -116,8 +129,21 @@ void apply_cmd(char *line, RocketState *st) {
             set_event(st, "Launch confirmed (JoyPi auth OK)");
         }
     } else if (!strcmp(cmd, "LAND")) {
-        st->landing = true;
-        set_event(st, "Landing sequence armed");
+        if (!st->launched) {
+            set_event(st, "Landing denied: vehicle has not launched");
+        } else if (st->altitude < 100000) {
+            set_event(st, "Landing denied: orbit not reached yet");
+        } else {
+            st->landing = true;
+            st->landing_start_fuel = st->fuel;
+            if (!st->fault1_display && !st->fault2_display) {
+                st->problem_active = false;
+                st->alerts[2] = false;
+            }
+            if (st->speed > 6000)
+                st->speed = 6000;
+            set_event(st, "Landing sequence armed");
+        }
     } else if (!strcmp(cmd, "TEST_MELODY_1")) {
         st->melody_test = 1;
         st->melody_ticks = 18;
@@ -130,6 +156,47 @@ void apply_cmd(char *line, RocketState *st) {
         st->melody_test = 3;
         st->melody_ticks = 18;
         set_event(st, "Melody test 3 running");
+    } else if (!strcmp(cmd, "FAULT1")) {
+        st->fault1_display = true;
+        st->problem_active = true;
+        st->alerts[2] = true;
+        st->fault1_since_ms = st->mission_ms;
+        set_event(st, "PANNE 1: temperature critique — BT7 pour reparer");
+    } else if (!strcmp(cmd, "FAULT2")) {
+        st->fault2_display = true;
+        st->problem_active = true;
+        st->alerts[2] = true;
+        st->fault2_since_ms = st->mission_ms;
+        set_event(st, "PANNE 2: stress structurel — BT8 pour reparer");
+    } else if (!strcmp(cmd, "FAULT1_OFF")) {
+        st->fault1_display = false;
+        st->fault1_since_ms = 0;
+        if (!st->fault2_display) {
+            st->problem_active = false;
+            st->alerts[2] = false;
+        }
+        set_event(st, "Panne 1 resolue (temperature normalisee)");
+    } else if (!strcmp(cmd, "FAULT2_OFF")) {
+        st->fault2_display = false;
+        st->fault2_since_ms = 0;
+        if (!st->fault1_display) {
+            st->problem_active = false;
+            st->alerts[2] = false;
+        }
+        set_event(st, "Panne 2 resolue (stress structurel reduit)");
+    } else if (!strcmp(cmd, "PASSCHAR")) {
+        if (st->launch_auth_popup && st->launch_passlen < (int)sizeof(st->launch_passbuf) - 1) {
+            st->launch_passbuf[st->launch_passlen++] = '*';
+            st->launch_passbuf[st->launch_passlen] = '\0';
+        }
+    } else if (!strcmp(cmd, "PASSBACK")) {
+        if (st->launch_auth_popup && st->launch_passlen > 0) {
+            st->launch_passlen--;
+            st->launch_passbuf[st->launch_passlen] = '\0';
+        }
+    } else if (!strcmp(cmd, "PASSRESET")) {
+        st->launch_passlen = 0;
+        st->launch_passbuf[0] = '\0';
     } else if (!strcmp(cmd, "FIX_PROBLEM")) {
         st->problem_active = false;
         st->alerts[0] = false;
@@ -137,6 +204,13 @@ void apply_cmd(char *line, RocketState *st) {
         st->alerts[2] = false;
         reset_for_relaunch(st);
         set_event(st, "Anomaly resolved: mission reset ready");
+    } else if (!strcmp(cmd, "RESET_SIM")) {
+        st->problem_active = false;
+        st->alerts[0] = false;
+        st->alerts[1] = false;
+        st->alerts[2] = false;
+        reset_for_relaunch(st);
+        set_event(st, "Mission reset from telemetry");
     } else if (!strcmp(cmd, "PROBLEM")) {
         st->problem_active = true;
         st->alerts[2] = true;
@@ -194,6 +268,7 @@ void apply_data(char *line, RocketState *st) {
     uppercase_inplace(cmd);
 
     if (sscanf(cmd, "SET %31s %d", key, &value) == 2) {
+        st->last_telemetry_ms = st->mission_ms;
         if (!strcmp(key, "SPEED")) {
             st->speed = value;
         } else if (!strcmp(key, "PRESSURE")) {
@@ -216,7 +291,8 @@ void apply_data(char *line, RocketState *st) {
         st->alerts[2] = true;
         set_event(st, "External anomaly ON");
     } else if (!strcmp(cmd, "PROBLEM OFF")) {
-        st->problem_active = false;
+        if (!st->fault1_display && !st->fault2_display)
+            st->problem_active = false;
         set_event(st, "External anomaly OFF");
     } else if (!strcmp(cmd, "ALERT1 ON")) {
         st->alerts[0] = true;
@@ -250,6 +326,15 @@ void handle_local_input(RocketState *st, int ch) {
             st->launch_auth_ok = true;
             st->launch_auth_result_ticks = 20;
             set_event(st, "Launch authorized (password OK), waiting ignition");
+            /* Notifier joypi_controller pour qu'il envoie CMD LU au satellite */
+            if (st->auth_pipe_fd < 0) {
+                mkfifo(AUTH_PIPE, 0666);
+                st->auth_pipe_fd = open(AUTH_PIPE, O_WRONLY | O_NONBLOCK);
+            }
+            if (st->auth_pipe_fd >= 0) {
+                const char *msg = "LAUNCH_AUTH_OK\n";
+                if (write(st->auth_pipe_fd, msg, 15) < 0) {}
+            }
         } else {
             st->launch_auth_ok = false;
             st->launch_auth_result_ticks = 20;

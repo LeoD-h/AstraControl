@@ -39,8 +39,8 @@ static const char *key_label(int key_num) {
         case 6:  return "BT4 TEMPERATURE";
         case 9:  return "BT5 PRESSION";
         case 10: return "BT6 MELODIE";
-        case 13: return "CONFIRMER (mdp)";
-        case 14: return "EFFACER/ANNULER (mdp)";
+        case 13: return "BT7 REP1 / CONFIRMER (mdp)";
+        case 14: return "BT8 REP2 / EFFACER (mdp)";
         default: return "(non assigne)";
     }
 }

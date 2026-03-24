@@ -11,13 +11,15 @@
 #include "ir_input.h"
 #include "joypi_controller.h"   /* KEY_CONFIRM, KEY_BACKSPACE (valeurs canoniques) */
 
+#include <stdio.h>
+
 #ifdef USE_WIRINGPI
 #include <wiringPi.h>
 #endif
 
-#define PIN_IR_PHYS     11   /* GPIO 17, physique pin 11 — partagé avec LED rouge */
+#define PIN_IR_PHYS     38   /* GPIO 20, physique pin 38 — même broche que Test/led.c */
 
-/* Codes NEC télécommande JoyPi standard (à calibrer sur matériel réel) */
+/* Codes NEC télécommande JoyPi standard (confirmés avec Test/led.c) */
 #define IR_KEY_0      0x00FF6897UL
 #define IR_KEY_1      0x00FF30CFUL
 #define IR_KEY_2      0x00FF18E7UL
@@ -30,75 +32,88 @@
 #define IR_KEY_9      0x00FF52ADUL
 #define IR_KEY_OK     0x00FF02FDUL
 #define IR_KEY_STAR   0x00FF22DDUL
-#define IR_KEY_REPEAT 0xFFFFFFFFUL
+#define IR_KEY_MINUS  0x00FFE01FUL
+#define IR_KEY_REPEAT 0x00FFFFFFUL
 
-/* Timings NEC (µs) */
-#define NEC_HDR_MARK    9000
-#define NEC_HDR_SPACE   4500
-#define NEC_ONE_SPACE   1690
-#define NEC_TOLERANCE    200
+/* Fenêtre de poll IR en MODE_PASSWORD (µs) — couvre largement une trame NEC ~86ms */
+#define IR_POLL_WINDOW_US  120000U
 
 #ifdef USE_WIRINGPI
 
-/* Mesure la durée d'un niveau sur le pin IR. Retourne µs ou -1 si timeout. */
-static long pulse_duration(int expected_level)
+static unsigned long g_ir_code = 0;
+static int g_ir_bit_count = 0;
+static unsigned int g_ir_last_time = 0;
+static int g_ir_code_ready = 0;
+static unsigned long g_ir_final_code = 0;
+
+static void ir_on_falling_edge(void)
 {
-    long count = 0;
-    while (digitalRead(PIN_IR_PHYS) != expected_level) {
-        if (++count > 15000) return -1;
-        delayMicroseconds(1);
+    unsigned int current_time = micros();
+    unsigned int delta = current_time - g_ir_last_time;
+    g_ir_last_time = current_time;
+
+    if (delta > 10000U) {
+        g_ir_bit_count = 0;
+        g_ir_code = 0;
+        return;
     }
-    count = 0;
-    while (digitalRead(PIN_IR_PHYS) == expected_level) {
-        if (++count > 15000) return -1;
-        delayMicroseconds(1);
+
+    if (g_ir_bit_count < 32) {
+        if (delta > 2000U) {
+            g_ir_code = (g_ir_code << 1) | 1UL;
+            g_ir_bit_count++;
+        } else if (delta > 1000U) {
+            g_ir_code = (g_ir_code << 1);
+            g_ir_bit_count++;
+        }
     }
-    return count;
+
+    if (g_ir_bit_count == 32) {
+        g_ir_final_code = g_ir_code & 0x00FFFFFFUL;
+        g_ir_code_ready = 1;
+        g_ir_bit_count = 0;
+    }
 }
 
-/* Décode une trame NEC. Retourne le code 32 bits ou 0 en cas d'erreur. */
-static unsigned long decode_nec(void)
+static unsigned long ir_decode_poll(unsigned int poll_us)
 {
-    long dur;
+    static int prev_state = HIGH;
+    unsigned int deadline = micros() + poll_us;
 
-    dur = pulse_duration(LOW);
-    if (dur < 0 || dur < NEC_HDR_MARK - NEC_TOLERANCE * 4) return 0;
-    if (dur > NEC_HDR_MARK + NEC_TOLERANCE * 4)             return 0;
+    while ((int)(micros() - (int)deadline) < 0) {
+        int cur_state = digitalRead(PIN_IR_PHYS);
+        if (cur_state == LOW && prev_state == HIGH) {
+            ir_on_falling_edge();
+        }
+        prev_state = cur_state;
 
-    dur = pulse_duration(HIGH);
-    if (dur < 0) return 0;
-    if (dur < NEC_HDR_SPACE / 2) return IR_KEY_REPEAT;
-
-    unsigned long code = 0;
-    int i;
-    for (i = 0; i < 32; i++) {
-        dur = pulse_duration(LOW);
-        if (dur < 0) return 0;
-        dur = pulse_duration(HIGH);
-        if (dur < 0) return 0;
-        code >>= 1;
-        if (dur > (NEC_ONE_SPACE - NEC_TOLERANCE))
-            code |= 0x80000000UL;
+        if (g_ir_code_ready) {
+            g_ir_code_ready = 0;
+            return g_ir_final_code;
+        }
+        delayMicroseconds(50);
     }
-    return code;
+    return 0;
 }
 
 static int ir_code_to_key(unsigned long code)
 {
-    switch (code) {
-        case IR_KEY_1: return 1;
-        case IR_KEY_2: return 2;
-        case IR_KEY_3: return 3;
-        case IR_KEY_4: return 4;
-        case IR_KEY_5: return 5;
-        case IR_KEY_6: return 6;
-        case IR_KEY_7: return 7;
-        case IR_KEY_8: return 8;
-        case IR_KEY_9: return 9;
-        case IR_KEY_0: return 10;
-        case IR_KEY_OK:   return KEY_CONFIRM;
-        case IR_KEY_STAR: return KEY_BACKSPACE;
-        default:          return 0;
+    unsigned long masked = code & 0x00FFFFFFUL;
+    switch (masked) {
+        case (IR_KEY_1 & 0x00FFFFFFUL): return 1;
+        case (IR_KEY_2 & 0x00FFFFFFUL): return 2;
+        case (IR_KEY_3 & 0x00FFFFFFUL): return 3;
+        case (IR_KEY_4 & 0x00FFFFFFUL): return 4;
+        case (IR_KEY_5 & 0x00FFFFFFUL): return 5;
+        case (IR_KEY_6 & 0x00FFFFFFUL): return 6;
+        case (IR_KEY_7 & 0x00FFFFFFUL): return 7;
+        case (IR_KEY_8 & 0x00FFFFFFUL): return 8;
+        case (IR_KEY_9 & 0x00FFFFFFUL): return 9;
+        case (IR_KEY_0 & 0x00FFFFFFUL): return 10;
+        case (IR_KEY_OK & 0x00FFFFFFUL):   return KEY_CONFIRM;
+        case (IR_KEY_STAR & 0x00FFFFFFUL): return KEY_BACKSPACE;
+        case (IR_KEY_MINUS & 0x00FFFFFFUL): return KEY_BACKSPACE;
+        default:                           return 0;
     }
 }
 
@@ -111,27 +126,39 @@ static int ir_code_to_key(unsigned long code)
 void ir_arm(void)
 {
 #ifdef USE_WIRINGPI
+    /* Pin 38 dédié IR (pas de conflit LED) */
     pinMode(PIN_IR_PHYS, INPUT);
+    pullUpDnControl(PIN_IR_PHYS, PUD_UP);
+    g_ir_code = 0;
+    g_ir_bit_count = 0;
+    g_ir_last_time = 0;
+    g_ir_code_ready = 0;
+    g_ir_final_code = 0;
 #endif
 }
 
 void ir_disarm(void)
 {
 #ifdef USE_WIRINGPI
-    pinMode(PIN_IR_PHYS, OUTPUT);
-    digitalWrite(PIN_IR_PHYS, LOW);
+    /* Rien à faire : pin 38 reste INPUT, pas de ressource partagée */
+    (void)0;
 #endif
 }
 
 int ir_poll(void)
 {
 #ifdef USE_WIRINGPI
-    if (digitalRead(PIN_IR_PHYS) == HIGH)
-        return 0;
-    unsigned long code = decode_nec();
+    /* Écoute pendant IR_POLL_WINDOW_US µs (80ms) avec détection de fronts.
+     * Retourne le numéro de touche, 0 si aucun code reçu dans la fenêtre. */
+    unsigned long code = ir_decode_poll(IR_POLL_WINDOW_US);
     if (code == 0 || code == IR_KEY_REPEAT)
         return 0;
-    return ir_code_to_key(code);
+    {
+        int key = ir_code_to_key(code);
+        printf("[IR] raw=0x%06lX key=%d\n", code & 0x00FFFFFFUL, key);
+        fflush(stdout);
+        return key;
+    }
 #else
     return 0;
 #endif

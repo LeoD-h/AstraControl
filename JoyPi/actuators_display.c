@@ -81,37 +81,63 @@ static void matrix_draw(const unsigned char rows[8]) {
 }
 #endif
 
+/* ------------------------------------------------------------------ */
+/* Police 5x8 compacte pour le scroll matrice (col0..col4, bit7=haut) */
+/* ------------------------------------------------------------------ */
+#ifdef USE_WIRINGPI
+static const unsigned char FONT_G[5] = {0x3E,0x41,0x49,0x49,0x3A};
+static const unsigned char FONT_o[5] = {0x00,0x1C,0x22,0x22,0x1C};
+static const unsigned char FONT_SPC[5]= {0x00,0x00,0x00,0x00,0x00};
+static const unsigned char FONT_f[5] = {0x00,0x3E,0x05,0x05,0x01};
+static const unsigned char FONT_u[5] = {0x00,0x1C,0x20,0x20,0x1C};
+static const unsigned char FONT_s[5] = {0x00,0x12,0x2A,0x2A,0x24};
+static const unsigned char FONT_e[5] = {0x00,0x1C,0x2A,0x2A,0x1A};
+
+/* Texte "Go fusee go " (avec esp. finale) : 12 chars × 6 cols = 72 cols */
+#define SCROLL_COLS 78
+static void build_scroll_buf(unsigned char cols[SCROLL_COLS]) {
+    static const unsigned char *const chars[] = {
+        FONT_G, FONT_o, FONT_SPC,
+        FONT_f, FONT_u, FONT_s, FONT_e, FONT_e, FONT_SPC,
+        FONT_G, FONT_o, FONT_SPC, FONT_SPC
+    };
+    static const int n_chars = 13;
+    int ci, col = 0, k;
+    for (ci = 0; ci < n_chars && col < SCROLL_COLS; ci++) {
+        for (k = 0; k < 5 && col < SCROLL_COLS; k++)
+            cols[col++] = chars[ci][k];
+        if (col < SCROLL_COLS)
+            cols[col++] = 0x00; /* espace inter-caractere */
+    }
+    while (col < SCROLL_COLS) cols[col++] = 0x00;
+}
+
+static void scroll_draw_at(const unsigned char cols[SCROLL_COLS], int offset) {
+    unsigned char rows[8] = {0};
+    int c, r;
+    for (c = 0; c < 8; c++) {
+        int src = offset + c;
+        unsigned char col_byte = (src < SCROLL_COLS) ? cols[src] : 0x00;
+        for (r = 0; r < 8; r++) {
+            if (col_byte & (0x80 >> r))
+                rows[r] |= (0x80 >> c);
+        }
+    }
+    matrix_draw(rows);
+}
+#endif /* USE_WIRINGPI */
+
 void actuator_matrix_launch(void) {
 #ifdef USE_WIRINGPI
-    static const unsigned char frames[8][8] = {
-        {0x00, 0x00, 0x08, 0x1C, 0x08, 0x00, 0x00, 0x00},
-        {0x00, 0x08, 0x1C, 0x3E, 0x1C, 0x08, 0x00, 0x00},
-        {0x00, 0x08, 0x1C, 0x3E, 0x7F, 0x1C, 0x08, 0x00},
-        {0x08, 0x1C, 0x3E, 0x7F, 0x3E, 0x1C, 0x08, 0x00},
-        {0x08, 0x1C, 0x3E, 0x7F, 0x3E, 0x7F, 0x1C, 0x00},
-        {0x1C, 0x3E, 0x7F, 0xFF, 0x7F, 0x3E, 0x1C, 0x00},
-        {0x08, 0x1C, 0x3E, 0x7F, 0xFF, 0x7F, 0x3E, 0x08},
-        {0x00, 0x08, 0x1C, 0x3E, 0x7F, 0x3E, 0x1C, 0x08},
-    };
+    unsigned char cols[SCROLL_COLS];
+    build_scroll_buf(cols);
     int i;
-    for (i = 0; i < 8; i++) {
-        matrix_draw(frames[i]);
-        usleep(90000);
+    for (i = 0; i < SCROLL_COLS; i++) {
+        scroll_draw_at(cols, i);
+        usleep(60000);
     }
 #else
-    static const char *frames[] = {
-        "[MATRIX]   ^   ",
-        "[MATRIX]  /|\\  ",
-        "[MATRIX] /_|_\\ ",
-        "[MATRIX]  |||  "
-    };
-    int i;
-    for (i = 0; i < 8; i++) {
-        printf("\n%s", frames[i % 4]);
-        fflush(stdout);
-        usleep(90000);
-    }
-    printf("\n");
+    printf("[MATRIX] >>> Go fusee go <<<\n");
     fflush(stdout);
 #endif
 }
@@ -167,9 +193,10 @@ static void seg_init(void) {
 #endif
 
 void actuator_segment_show(int value) {
-    int n = value;
-    if (n < 0)    n = 0;
-    if (n > 9999) n = 9999;
+    int negative = (value < 0);
+    int n = negative ? -value : value;
+    if (n > 9999)
+        n = 9999;
 
     int d0 = (n / 1000) % 10;
     int d1 = (n /  100) % 10;
@@ -181,24 +208,29 @@ void actuator_segment_show(int value) {
         0x3F, 0x06, 0x5B, 0x4F, 0x66,
         0x6D, 0x7D, 0x07, 0x7F, 0x6F
     };
+    static const unsigned char minus = 0x40;
     seg_init();
     if (g_seg_fd < 0) {
         printf("[7SEG] (i2c indisponible) value=%d\n", value);
         fflush(stdout);
         return;
     }
+    /* Layout HT16K33 4 digits : reg 0x00=gauche, 0x02, 0x04=COLON, 0x06, 0x08=droite
+     * buf[i] → registre i*2 → buf[0]=chiffre0(gauche), buf[2]=COLON(OFF), buf[4]=chiffre3(droite) */
     unsigned char buf[8] = {0};
-    buf[0] = digits[d2];
-    buf[1] = digits[d3];
-    buf[2] = digits[d0];
-    buf[3] = digits[d1];
+    buf[0] = negative ? minus : digits[d0];  /* reg 0x00 → chiffre 0 (gauche) */
+    buf[1] = digits[d1];  /* reg 0x02 → chiffre 1             = centaines */
+    buf[2] = 0x00;        /* reg 0x04 → COLON OFF              */
+    buf[3] = digits[d2];  /* reg 0x06 → chiffre 2             = dizaines */
+    buf[4] = digits[d3];  /* reg 0x08 → chiffre 3 (droite)   = unités */
     int i;
     for (i = 0; i < 8; i++) {
         (void)wiringPiI2CWriteReg8(g_seg_fd, i * 2,     buf[i]);
         (void)wiringPiI2CWriteReg8(g_seg_fd, i * 2 + 1, 0x00);
     }
 #else
-    printf("[7SEG] %d%d%d%d  (valeur=%d)\n", d0, d1, d2, d3, value);
+    printf("[7SEG] %c%d%d%d  (valeur=%d)\n",
+           negative ? '-' : (char)('0' + d0), d1, d2, d3, value);
     fflush(stdout);
 #endif
 }

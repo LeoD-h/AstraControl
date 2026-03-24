@@ -30,6 +30,9 @@ bool send_cmd_recv(ControllerState *st,
 /* ---- Réception non-bloquante messages push ---- */
 void poll_satellite_push(ControllerState *st);
 
+/* ---- Auth pipe : décollage depuis clavier controle_fusee ---- */
+void poll_auth_pipe(ControllerState *st);
+
 /* ---- Initialisation état ---- */
 void state_init(ControllerState *st, const char *ip, int port);
 

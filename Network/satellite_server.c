@@ -37,7 +37,7 @@
 #define CMD_PIPE              "/tmp/rocket_cmd.pipe"
 #define DATA_PIPE             "/tmp/rocket_data.pipe"
 #define MAX_CLIENTS           MAX_CLIENTS_H
-#define TELEMETRY_INTERVAL_MS 2000ULL
+#define TELEMETRY_INTERVAL_MS 500ULL
 #define SELECT_TIMEOUT_MS     100
 
 /* ------------------------------------------------------------------ */

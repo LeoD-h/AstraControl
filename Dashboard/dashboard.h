@@ -27,6 +27,8 @@ typedef struct {
     bool landing;
     bool exploded;
     bool problem_active;
+    bool fault1_display;
+    bool fault2_display;
 
     int thrust_kn;
     int pitch;
@@ -54,6 +56,12 @@ typedef struct {
     int launch_passlen;
     int launch_auth_result_ticks;
     bool launch_auth_ok;
+    int fault1_since_ms;
+    int fault2_since_ms;
+    int landing_start_fuel;
+    int last_telemetry_ms;
+    /* Pipe vers joypi_controller pour déclencher CMD LU depuis le clavier */
+    int auth_pipe_fd;
 } RocketState;
 
 void init_state(RocketState *st);

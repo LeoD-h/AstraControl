@@ -8,16 +8,20 @@
  * Version     : 1.0
  ************************************************************/
 #include <curses.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stddef.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "dashboard.h"
 #include "pipes.h"
 
 #define FRAME_MS 120
-#define CMD_PIPE "/tmp/rocket_cmd.pipe"
+#define CMD_PIPE  "/tmp/rocket_cmd.pipe"
 #define DATA_PIPE "/tmp/rocket_data.pipe"
+#define AUTH_PIPE "/tmp/rocket_auth.pipe"
 
 static void on_exit_signal(int sig) {
     (void)sig;
@@ -33,8 +37,13 @@ int main(void) {
 
     int keep_cmd = -1;
     int keep_data = -1;
-    int cmd_fd = setup_pipe_reader(CMD_PIPE, &keep_cmd);
+    int cmd_fd  = setup_pipe_reader(CMD_PIPE,  &keep_cmd);
     int data_fd = setup_pipe_reader(DATA_PIPE, &keep_data);
+
+    /* Auth pipe : écriture vers joypi_controller (clavier → CMD LU) */
+    mkfifo(AUTH_PIPE, 0666);
+    st.auth_pipe_fd = open(AUTH_PIPE, O_WRONLY | O_NONBLOCK);
+    /* ENXIO si joypi_controller pas encore connecté — réessayé à la validation */
 
     char pending_cmd[512] = {0};
     size_t used_cmd = 0;
@@ -87,9 +96,10 @@ int main(void) {
     }
 
     endwin();
-    if (cmd_fd >= 0) close(cmd_fd);
+    if (cmd_fd  >= 0) close(cmd_fd);
     if (data_fd >= 0) close(data_fd);
-    if (keep_cmd >= 0) close(keep_cmd);
+    if (keep_cmd  >= 0) close(keep_cmd);
     if (keep_data >= 0) close(keep_data);
+    if (st.auth_pipe_fd >= 0) close(st.auth_pipe_fd);
     return 0;
 }

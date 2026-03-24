@@ -18,7 +18,7 @@
 /* Constantes                                                          */
 /* ------------------------------------------------------------------ */
 
-#define DEFAULT_SAT_IP   "192.168.64.7"
+#define DEFAULT_SAT_IP   "192.168.1.25"
 #define DEFAULT_SAT_PORT 5555
 
 #define CMD_PIPE  "/tmp/rocket_cmd.pipe"
@@ -30,18 +30,22 @@
 #define POLL_TIMEOUT_MS   80
 
 /* Numéros logiques des touches physiques
- * COL_PINS = {37, 22, 35, 33} (partagés avec joystick — gérés par read_direction)
  * key_num = r*4 + (4-c)
- *   c=0/pin37 → keys 4,8,12,16  |  c=1/pin22 → keys 3,7,11,15
- *   c=2/pin35 → keys 2,6,10,14  |  c=3/pin33 → keys 1,5,9,13   */
-#define KEY_BT1        3   /* row1, col1 : LANCEMENT (saisie mdp)     */
-#define KEY_BT2        4   /* row1, col0 : ATTERRISSAGE URGENCE        */
-#define KEY_BT3        7   /* row2, col1 : DEMANDE ALTITUDE             */
-#define KEY_BT4        8   /* row2, col0 : DEMANDE TEMPERATURE          */
-#define KEY_BT5       11   /* row3, col1 : CYCLE PRESSION               */
-#define KEY_BT6       12   /* row3, col0 : MELODIE (cycle 1..3)         */
-#define KEY_BT7       15   /* row4, col1 : RÉSOLUTION PANNE TEMP (REP1) */
-#define KEY_BT8       16   /* row4, col0 : RÉSOLUTION PANNE STRESS (REP2)*/
+ * Colonnes câblées physiquement : pin33 (col3) et pin35 (col2).
+ * Ces deux pins sont aussi partagées avec le joystick DOWN (pin33) et RIGHT (pin35).
+ *   c=3/pin33 → keys 1,5,9,13   (câblé — boutons + joystick DOWN direction)
+ *   c=2/pin35 → keys 2,6,10,14  (câblé — boutons + joystick RIGHT direction)
+ *   c=1/pin22 → non câblé comme bouton — joystick LEFT direction
+ *   c=0/pin37 → non câblé comme bouton — joystick UP direction            */
+#define KEY_BT1        1   /* row0, col3 (pin33) : LANCEMENT (saisie mdp)       */
+#define KEY_BT2        2   /* row0, col2 (pin35) : ATTERRISSAGE URGENCE          */
+#define KEY_BT3        5   /* row1, col3 (pin33) : DEMANDE ALTITUDE              */
+#define KEY_BT4        6   /* row1, col2 (pin35) : DEMANDE TEMPERATURE           */
+#define KEY_BT5        9   /* row2, col3 (pin33) : CYCLE PRESSION                */
+#define KEY_BT6       10   /* row2, col2 (pin35) : MELODIE                       */
+/* BT7/BT8 partagent les mêmes key_num que CONFIRM/BACKSPACE (double usage selon mode) */
+#define KEY_BT7       13   /* row3, col3 (pin33) : REPARE PANNE 1 (temperature)  */
+#define KEY_BT8       14   /* row3, col2 (pin35) : REPARE PANNE 2 (stress)       */
 
 /* Mode saisie mot de passe */
 #define MODE_NORMAL       0
@@ -49,9 +53,9 @@
 #define PASSWORD_MAX_LEN  8
 #define PASSWORD_CORRECT  "123"
 
-/* Touches spéciales en mode mot de passe */
-#define KEY_CONFIRM    13   /* row4, col3 (pin33) — confirmer */
-#define KEY_BACKSPACE  14   /* row4, col2 (pin35) — effacer   */
+/* Touches spéciales en mode mot de passe (même pins que BT7/BT8) */
+#define KEY_CONFIRM    13   /* row3, col3 (pin33) — confirmer (= KEY_BT7) */
+#define KEY_BACKSPACE  14   /* row3, col2 (pin35) — effacer   (= KEY_BT8) */
 
 /* ------------------------------------------------------------------ */
 /* Structure état contrôleur                                           */
@@ -77,6 +81,10 @@ typedef struct {
     bool   fault2_active;   /* panne 2 : stress structurel (EVENT PROBLEM2) */
     /* Dernière vitesse reçue en télémétrie */
     int    last_speed;
+    int    last_altitude;
+    /* Affichage 7-seg verrouillé (BT3/BT4 → reste jusqu'à autre bouton) */
+    bool   seg_override;
+    bool   explosion_notified;
 } ControllerState;
 
 /* Global stop (défini dans joypi_controller.c, utilisé dans ctrl_keys.c) */

@@ -5,10 +5,9 @@
  *               Afficheurs (matrice, 7-seg, LCD) dans actuators_display.c.
  *
  * Contrainte matérielle :
- *   LED verte = servo droit 1 = physical pin 37 (GPIO 26)
- *   LED rouge = servo droit 2 = physical pin 11 (GPIO 17)
+ *   LED rouge = servo 1 = physical pin 37
+ *   LED verte = servo 2 = physical pin 22
  *   Buzzer    = physical pin 12 (GPIO 18, capable PWM)
- *   Pin 22 et 33 NON DISPONIBLES
  *
  * Auteurs     : Léo, Inès, Juliann
  * Date        : 12/03/2026
@@ -28,8 +27,8 @@
 /* ------------------------------------------------------------------ */
 
 #ifdef USE_WIRINGPI
-#define PIN_LED_GREEN_PHYS  37   /* GPIO 26 — LED verte, servo droit 1 */
-#define PIN_LED_RED_PHYS    11   /* GPIO 17 — LED rouge, servo droit 2  */
+#define PIN_LED_RED_PHYS    37   /* LED rouge — servo 1 */
+#define PIN_LED_GREEN_PHYS  22   /* LED verte — servo 2 */
 #define PIN_BUZZER_PHYS     12   /* GPIO 18 — buzzer PWM                */
 #endif
 
@@ -155,12 +154,13 @@ void actuator_buzzer_melody_a(void) {
     printf("[BUZZER] Melodie A (decollage)\n");
     fflush(stdout);
 #endif
-    play_tone(523,  200); /* C5 */
-    play_tone(659,  200); /* E5 */
-    play_tone(784,  200); /* G5 */
-    play_tone(1047, 400); /* C6 */
-    play_tone(988,  100); /* B5 */
-    play_tone(1047, 600); /* C6 */
+    play_tone(523,  140); /* C5 */
+    play_tone(659,  140); /* E5 */
+    play_tone(784,  160); /* G5 */
+    play_tone(988,  180); /* B5 */
+    play_tone(1047, 220); /* C6 */
+    play_tone(1319, 220); /* E6 */
+    play_tone(1568, 480); /* G6 */
     play_tone(0,     50);
 }
 
@@ -171,13 +171,16 @@ void actuator_buzzer_melody_b(void) {
     printf("[BUZZER] Melodie B (atterrissage/urgence)\n");
     fflush(stdout);
 #endif
-    for (i = 0; i < 5; i++) {
-        play_tone(880, 150);
-        play_tone(0,    80);
+    for (i = 0; i < 3; i++) {
+        play_tone(1047, 120);
+        play_tone(0,     45);
+        play_tone(784,  120);
+        play_tone(0,     45);
     }
-    play_tone(660, 200);
-    play_tone(440, 300);
-    play_tone(220, 500);
+    play_tone(659, 180);
+    play_tone(523, 220);
+    play_tone(392, 260);
+    play_tone(262, 420);
     play_tone(0,    50);
 }
 
@@ -187,11 +190,13 @@ void actuator_buzzer_melody_c(void) {
     printf("[BUZZER] Melodie C (panne)\n");
     fflush(stdout);
 #endif
-    play_tone(440, 300);
-    play_tone(0,   100);
-    play_tone(440, 300);
-    play_tone(0,   100);
-    play_tone(330, 500);
+    play_tone(392, 260);
+    play_tone(0,    70);
+    play_tone(311, 260);
+    play_tone(0,    70);
+    play_tone(247, 320);
+    play_tone(0,    70);
+    play_tone(196, 420);
     play_tone(0,    50);
 }
 

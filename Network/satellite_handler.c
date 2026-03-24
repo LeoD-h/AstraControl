@@ -14,9 +14,40 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define CMD_PIPE  "/tmp/rocket_cmd.pipe"
 #define DATA_PIPE "/tmp/rocket_data.pipe"
+
+static time_t g_fault1_started = 0;
+static time_t g_fault2_started = 0;
+
+static int telemetry_in_orbit(void) {
+    return g_telem.altitude >= 100000;
+}
+
+static void refresh_state_from_telemetry(void) {
+    if (g_telem.state == SAT_STATE_EXPLODED)
+        return;
+
+    if (g_telem.altitude <= 0 && g_altitude_received) {
+        if (g_telem.state == SAT_STATE_LANDING || g_telem.state == SAT_STATE_EMERGENCY) {
+            return;
+        }
+        if (g_telem.speed <= 0) {
+            g_telem.state = SAT_STATE_READY;
+            return;
+        }
+    }
+
+    if (g_telem.state == SAT_STATE_EMERGENCY || g_telem.state == SAT_STATE_LANDING) {
+        return;
+    }
+
+    if (g_telem.altitude > 0 || g_telem.speed > 0) {
+        g_telem.state = SAT_STATE_FLYING;
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /* Broadcast                                                           */
@@ -67,6 +98,25 @@ void push_telemetry(SatClientH clients[]) {
 /* ------------------------------------------------------------------ */
 
 void check_state_transitions(SatClientH clients[]) {
+    time_t now = time(NULL);
+
+    if (g_telem.fault1_active && g_fault1_started != 0 && (now - g_fault1_started) >= 10) {
+        g_telem.state = SAT_STATE_EXPLODED;
+        broadcast_controllers(clients, "EVENT EXPLODED");
+        write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "EXPLODE");
+        log_line("WARN", "fault1 non resolue depuis 10s -> EXPLODED");
+        g_fault1_started = 0;
+        return;
+    }
+    if (g_telem.fault2_active && g_fault2_started != 0 && (now - g_fault2_started) >= 10) {
+        g_telem.state = SAT_STATE_EXPLODED;
+        broadcast_controllers(clients, "EVENT EXPLODED");
+        write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "EXPLODE");
+        log_line("WARN", "fault2 non resolue depuis 10s -> EXPLODED");
+        g_fault2_started = 0;
+        return;
+    }
+
     /* Carburant épuisé en vol -> atterrissage automatique */
     if (g_telem.state == SAT_STATE_FLYING && g_telem.fuel <= 0) {
         g_telem.state = SAT_STATE_LANDING;
@@ -100,6 +150,7 @@ void check_state_transitions(SatClientH clients[]) {
 
 static void handle_controller_cmd(SatClientH clients[], int idx, const char *line) {
     SatClientH *c = &clients[idx];
+    int in_orbit = telemetry_in_orbit();
 
     if (strcmp(line, "AUTH CONTROLLER") == 0) {
         c->type   = SAT_CLIENT_CONTROLLER;
@@ -127,19 +178,23 @@ static void handle_controller_cmd(SatClientH clients[], int idx, const char *lin
         g_telem.pressure_corrector = false;
         g_telem.fault1_active      = false;
         g_telem.fault2_active      = false;
+        g_fault1_started           = 0;
+        g_fault2_started           = 0;
         send_to_client(c->fd, "OK LAUNCH");
         broadcast_controllers(clients, "EVENT LAUNCH");
         broadcast_injectors(clients, "CMD_EVENT LAUNCH");
-        write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "LAUNCH");
-        write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "SIM_FLIGHT ON");
+        write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "LAUNCH_OK");
         log_line("INFO", "LAUNCH par peer=%s", c->peer);
         return;
     }
 
     if (strcmp(line, "CMD LD") == 0) {
-        if (g_telem.state != SAT_STATE_FLYING
-                && g_telem.state != SAT_STATE_LANDING) {
+        if (g_telem.state != SAT_STATE_FLYING) {
             send_to_client(c->fd, "FAIL NOT_FLYING");
+            return;
+        }
+        if (!in_orbit) {
+            send_to_client(c->fd, "FAIL NOT_IN_ORBIT");
             return;
         }
         g_telem.state = SAT_STATE_EMERGENCY;
@@ -177,7 +232,6 @@ static void handle_controller_cmd(SatClientH clients[], int idx, const char *lin
             g_telem.pressure_corrector = true;
             send_to_client(c->fd, "OK PRES_FIX");
             broadcast_controllers(clients, "EVENT RESOLVED");
-            write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "FIX_PROBLEM");
             write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", "PROBLEM OFF");
             log_line("INFO", "PRESSION: correcteur peer=%s", c->peer);
         } else {
@@ -196,6 +250,7 @@ static void handle_controller_cmd(SatClientH clients[], int idx, const char *lin
             return;
         }
         g_telem.fault1_active = false;
+        g_fault1_started = 0;
         send_to_client(c->fd, "OK REP1_FIX");
         broadcast_controllers(clients, "EVENT RESOLVED1");
         broadcast_injectors(clients, "CMD_EVENT FIX_TEMP");
@@ -210,6 +265,7 @@ static void handle_controller_cmd(SatClientH clients[], int idx, const char *lin
             return;
         }
         g_telem.fault2_active = false;
+        g_fault2_started = 0;
         send_to_client(c->fd, "OK REP2_FIX");
         broadcast_controllers(clients, "EVENT RESOLVED2");
         broadcast_injectors(clients, "CMD_EVENT FIX_STRESS");
@@ -284,10 +340,12 @@ static void handle_injector_cmd(SatClientH clients[], int idx, const char *line)
                 snprintf(buf, sizeof(buf), "SET TEMP %d", val);
                 write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", buf);
                 if (val > SAT_TEMP_CRITICAL
-                        && g_telem.state == SAT_STATE_FLYING
+                        && g_telem.state != SAT_STATE_READY
                         && !g_telem.fault1_active) {
                     g_telem.fault1_active = true;
+                    g_fault1_started = time(NULL);
                     broadcast_controllers(clients, "EVENT PROBLEM1");
+                    write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "FAULT1");
                     write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", "PROBLEM ON");
                     log_line("WARN", "temperature critique %dC -> EVENT PROBLEM1", val);
                 }
@@ -304,14 +362,17 @@ static void handle_injector_cmd(SatClientH clients[], int idx, const char *line)
             } else if (strcmp(field, "STRESS") == 0) {
                 g_telem.stress = val;
                 if (val > SAT_STRESS_CRITICAL
-                        && g_telem.state == SAT_STATE_FLYING
+                        && g_telem.state != SAT_STATE_READY
                         && !g_telem.fault2_active) {
                     g_telem.fault2_active = true;
+                    g_fault2_started = time(NULL);
                     broadcast_controllers(clients, "EVENT PROBLEM2");
+                    write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "FAULT2");
                     write_to_pipe(&g_data_pipe_fd, "/tmp/rocket_data.pipe", "PROBLEM ON");
                     log_line("WARN", "stress critique %d -> EVENT PROBLEM2", val);
                 }
             }
+            refresh_state_from_telemetry();
             send_to_client(c->fd, "OK");
         } else {
             send_to_client(c->fd, "FAIL BAD_FORMAT");

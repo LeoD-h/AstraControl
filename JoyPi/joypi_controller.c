@@ -97,9 +97,9 @@ int main(int argc, char **argv) {
 #ifdef USE_WIRINGPI
     setup_gpio();
     printf("[ctrl] Mode GPIO réel (wiringPi, physique)\n");
-    printf("[ctrl] Rows: 13,15,29,31  |  Cols: 37,22,35,33 (partagés joystick)\n");
-    printf("[ctrl] BT1(3)=LAUNCH BT2(4)=LAND BT3(7)=ALT BT4(8)=TEMP\n");
-    printf("[ctrl] BT5(11)=PRES BT6(12)=MEL BT7(15)=REP1 BT8(16)=REP2\n");
+    printf("[ctrl] Rows: 13,15,29,31  |  Cols actifs boutons: pin33(col3) pin35(col2)\n");
+    printf("[ctrl] BT1(1)=LAUNCH BT2(2)=LAND BT3(5)=ALT BT4(6)=TEMP\n");
+    printf("[ctrl] BT5(9)=PRES BT6(10)=MEL BT7(13)=REP1 BT8(14)=REP2\n");
     printf("[ctrl] DIR UP/DOWN/LEFT/RIGHT → commandes dashboard ncurses\n");
 #else
     actuator_init();
@@ -111,6 +111,7 @@ int main(int argc, char **argv) {
     /* Ouverture initiale des pipes */
     st.cmd_pipe_fd  = -1;
     st.data_pipe_fd = -1;
+    st.auth_pipe_fd = -1;
 
     /* Première tentative de connexion */
     try_reconnect(&st);
@@ -126,11 +127,15 @@ int main(int argc, char **argv) {
 
         /* 3. Scanner boutons GPIO (ou stdin en simulation) */
         scan_buttons_and_handle(&st);
+
+        /* 4. Auth pipe : décollage initié depuis le clavier de controle_fusee */
+        poll_auth_pipe(&st);
     }
 
     printf("\n[ctrl] Arrêt demandé\n");
 
     if (st.sat_fd      >= 0) close(st.sat_fd);
+    if (st.auth_pipe_fd>= 0) close(st.auth_pipe_fd);
     if (st.cmd_pipe_fd >= 0) close(st.cmd_pipe_fd);
     if (st.data_pipe_fd>= 0) close(st.data_pipe_fd);
 
