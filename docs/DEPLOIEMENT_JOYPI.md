@@ -110,9 +110,13 @@ To-JoyPI/
   bin-util/
     controle_fusee      (ARM - dashboard ncurses)
     joypi_controller    (ARM - client satellite + wiringPi)
-  bin-proto/
+  tests/
     hardware_buttons_test    (ARM - test boutons physiques)
     hardware_actuators_test  (ARM - test actionneurs)
+    hardware_stop            (ARM - reset hardware)
+    ir_test                  (ARM - calibration télécommande IR)
+    moteur_test              (ARM - test servos)
+    hw_button_test           (ARM - test matrice + joystick)
   lib/
     libncursesw.so.6.6  (ncurses cross-compile)
     libncursesw.so.6    -> libncursesw.so.6.6
@@ -186,7 +190,7 @@ cd To-JoyPI
 
 ```bash
 . ./joypi_env.sh
-./bin-proto/hardware_buttons_test
+./tests/hardware_buttons_test
 ```
 
 Affiche les evenements de chaque bouton detecte par wiringPi.
@@ -195,7 +199,7 @@ Affiche les evenements de chaque bouton detecte par wiringPi.
 
 ```bash
 . ./joypi_env.sh
-./bin-proto/hardware_actuators_test
+./tests/hardware_actuators_test
 ```
 
 Active et desactive sequentiellement chaque actionneur pour verification.

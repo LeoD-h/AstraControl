@@ -501,9 +501,13 @@ To-JoyPI/
 ├── bin-util/
 │   ├── controle_fusee       (dashboard ncurses ARM)
 │   └── joypi_controller     (contrôleur satellite ARM)
-├── bin-proto/
+├── tests/
 │   ├── hardware_buttons_test
-│   └── hardware_actuators_test
+│   ├── hardware_actuators_test
+│   ├── hardware_stop
+│   ├── ir_test
+│   ├── moteur_test
+│   └── hw_button_test
 ├── lib/
 │   ├── libncursesw.so.6.6
 │   ├── libncursesw.so.6 → libncursesw.so.6.6
@@ -624,7 +628,7 @@ CMD ALT          # DATA ALT 0
 
 ```bash
 # Sur le JoyPi (après déploiement)
-sudo ./bin-proto/hardware_actuators_test
+sudo ./tests/hardware_actuators_test
 # Vérifier visuellement : LED, buzzer, matrice, 7-seg, LCD
 ```
 
