@@ -10,8 +10,6 @@ BIN_TEST_DIR  = $(BIN_DIR)/tests
 
 VM_DIR    = To-VM
 JOYPI_DIR = To-JoyPI
-VM_ZIP    = $(VM_DIR).zip
-JOYPI_ZIP = $(JOYPI_DIR).zip
 
 # Cross-compilateur ARM (JoyPi et RPi)
 PATH_CC          = /home/leo/Desktop/CCR/tools-master/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian-x64/bin
@@ -71,7 +69,7 @@ ifneq ($(V),1)
 Q ?= @
 endif
 
-.PHONY: all vm joypi svm sjoypi clean
+.PHONY: all vm joypi clean
 
 # ------------ Cibles principales ------------
 
@@ -221,20 +219,9 @@ $(HW_BTN_TEST_JOYPI): $(SRC_HW_BTN_TEST) | $(BIN_TEST_DIR)
 	$(Q)$(CC_CROSS) $(CFLAGS_BASE) -IJoyPi -IJoyPi/tests $(WIRINGPI_INC) -DUSE_WIRINGPI -DHW_BUTTON_STANDALONE -o $@ $^ $(WIRINGPI_LDIR) -lwiringPi -ldl
 	@echo "  [ARM]  hw_button_test"
 
-# ------------ Envoi via SCP ------------
-
-svm: vm
-	$(Q)zip -r -q $(VM_ZIP) $(VM_DIR)
-	$(Q)read -p "IP VM/RPi: " ip; read -p "SSH user [leo]: " user; user=$${user:-leo}; scp $(VM_ZIP) $$user@$$ip:~/Desktop/
-	@echo "VM bundle envoye."
-
-sjoypi: joypi
-	$(Q)zip -r -q $(JOYPI_ZIP) $(JOYPI_DIR)
-	$(Q)read -p "IP JoyPi: " ip; read -p "SSH user [leo]: " user; user=$${user:-leo}; scp $(JOYPI_ZIP) $$user@$$ip:~/Desktop/
-	@echo "JoyPi bundle envoye."
 
 # ------------ Nettoyage ------------
 
 clean:
-	$(Q)rm -rf $(BIN_DIR) $(VM_DIR) $(JOYPI_DIR) $(VM_ZIP) $(JOYPI_ZIP)
+	$(Q)rm -rf $(BIN_DIR) $(VM_DIR) $(JOYPI_DIR)
 	@echo "Cleaned."

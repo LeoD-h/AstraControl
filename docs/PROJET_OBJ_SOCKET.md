@@ -11,7 +11,7 @@
    - `/tmp/rocket_cmd.pipe`
    - `/tmp/rocket_data.pipe`
 2. `socket_bridge_server` ecoute en TCP (port `5555` par defaut).
-3. Chaque message recu est decode via dictionnaire (`protocol.c`) puis redirige:
+3. Chaque message recu est decode via `satellite_handler.c` puis redirige:
    - vers pipe commande (tilt, launch, land, alertes, etc.)
    - vers pipe data (SET FUEL, SET SPEED, PROBLEM ON/OFF, etc.)
 4. Le dashboard met a jour l'affichage en temps reel.

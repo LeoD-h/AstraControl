@@ -59,7 +59,7 @@
 #define IR_KEY_HASH 0x00FFB04F
 #define IR_KEY_UP  0x00FF629D
 #define IR_KEY_DOWN 0x00FFA857
-#define IR_KEY_LEFT 0x00FF22DD
+#define IR_KEY_LEFT 0x00FF22DD  /* même code que IR_KEY_STAR — à calibrer */
 #define IR_KEY_RIGHT 0x00FFC23D
 #define IR_KEY_REPEAT 0xFFFFFFFF
 
@@ -88,7 +88,7 @@ static const char *ir_key_name(unsigned long code) {
         case IR_KEY_HASH:  return "# (annuler)";
         case IR_KEY_UP:    return "HAUT";
         case IR_KEY_DOWN:  return "BAS";
-        case IR_KEY_LEFT:  return "GAUCHE";
+        /* IR_KEY_LEFT == IR_KEY_STAR (0x00FF22DD) — code à calibrer, case dédupliqué */
         case IR_KEY_RIGHT: return "DROITE";
         case IR_KEY_REPEAT: return "(répétition)";
         default:           return "(inconnu)";

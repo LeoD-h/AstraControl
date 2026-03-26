@@ -24,7 +24,7 @@ VM (192.168.64.7)          <-- TCP 5555 -->    JoyPi (192.168.1.21)
 
 | Programme            | Machine | Sources                                                           |
 |----------------------|---------|-------------------------------------------------------------------|
-| `satellite_server`   | VM      | `Network/satellite_server.c` + `Network/protocol.c`              |
+| `satellite_server`   | VM      | `Network/satellite_server.c` + `Network/satellite_handler.c`     |
 | `controle_fusee_data`| VM      | `Dashboard/data_input_text.c` + `Dashboard/dashboard_common.c`   |
 | `joypi_controller`   | JoyPi   | `JoyPi/joypi_controller.c` + `JoyPi/actuators.c`                 |
 | `controle_fusee`     | JoyPi   | `Dashboard/main.c` + `dashboard_logic.c` + `dashboard_visuals.c` + `pipes.c` |

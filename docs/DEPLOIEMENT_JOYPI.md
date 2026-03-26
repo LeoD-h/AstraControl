@@ -28,7 +28,7 @@
 
 Serveur TCP central. Recoit les commandes du JoyPi, gere l'etat de la fusee, repond avec la telemetrie.
 
-- Sources : `Network/satellite_server.c` + `Network/protocol.c`
+- Sources : `Network/satellite_server.c` + `Network/satellite_handler.c`
 - Binaire VM (x86) : `To-VM/bin-util/satellite_server`
 - Binaire RPi (ARM) : `To-VM/bin-util/satellite_server_rpi`
 - Lancement :
