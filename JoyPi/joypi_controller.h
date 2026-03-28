@@ -85,6 +85,7 @@ typedef struct {
     /* Affichage 7-seg verrouillé (BT3/BT4 → reste jusqu'à autre bouton) */
     bool   seg_override;
     bool   explosion_notified;
+    bool   launch_in_progress;
 } ControllerState;
 
 /* Global stop (défini dans joypi_controller.c, utilisé dans ctrl_keys.c) */

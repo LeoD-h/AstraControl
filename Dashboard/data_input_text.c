@@ -103,52 +103,60 @@ static int send_set(int fd, const char *line, char *pending, size_t *used, GenMo
     char reply[256];
     size_t offset = 0;
     int got_ok = 0;
+    int attempts = 0;
     int len = snprintf(msg, sizeof(msg), "%s\n", line);
     ssize_t nw = write(fd, msg, (size_t)len);
     (void)nw;
 
-    fd_set rfds;
-    struct timeval tv;
-    FD_ZERO(&rfds);
-    FD_SET(fd, &rfds);
-    tv.tv_sec  = 0;
-    tv.tv_usec = 200000;
-    int rc = select(fd + 1, &rfds, NULL, NULL, &tv);
-    if (rc <= 0) return -1;
+    while (!got_ok && attempts < 6) {
+        fd_set rfds;
+        struct timeval tv;
 
-    if (*used >= 1023) {
-        *used = 0;
-        pending[0] = '\0';
-    }
-    if (*used > 0) {
-        memcpy(reply, pending, *used);
-        offset = *used;
-        *used = 0;
-        pending[0] = '\0';
-    }
-
-    ssize_t nr = read(fd, reply + offset, sizeof(reply) - offset - 1);
-    if (nr <= 0) return -1;
-    reply[offset + (size_t)nr] = '\0';
-
-    char *start = reply;
-    char *nl;
-    while ((nl = strchr(start, '\n')) != NULL) {
-        *nl = '\0';
-        if (strcmp(start, "OK") == 0) {
-            got_ok = 1;
-        } else if (start[0] != '\0') {
-            process_server_line(gm, start);
+        if (*used >= 1023) {
+            *used = 0;
+            pending[0] = '\0';
         }
-        start = nl + 1;
-    }
+        if (*used > 0) {
+            memcpy(reply, pending, *used);
+            offset = *used;
+            *used = 0;
+            pending[0] = '\0';
+        } else {
+            offset = 0;
+        }
 
-    if (*start != '\0') {
-        size_t remain = strlen(start);
-        if (remain >= 1023) remain = 1023;
-        memcpy(pending, start, remain);
-        pending[remain] = '\0';
-        *used = remain;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        tv.tv_sec  = 0;
+        tv.tv_usec = 250000;
+        if (select(fd + 1, &rfds, NULL, NULL, &tv) > 0) {
+            ssize_t nr = read(fd, reply + offset, sizeof(reply) - offset - 1);
+            if (nr <= 0) return -1;
+            reply[offset + (size_t)nr] = '\0';
+        } else {
+            reply[offset] = '\0';
+        }
+
+        char *start = reply;
+        char *nl;
+        while ((nl = strchr(start, '\n')) != NULL) {
+            *nl = '\0';
+            if (strcmp(start, "OK") == 0) {
+                got_ok = 1;
+            } else if (start[0] != '\0') {
+                process_server_line(gm, start);
+            }
+            start = nl + 1;
+        }
+
+        if (*start != '\0') {
+            size_t remain = strlen(start);
+            if (remain >= 1023) remain = 1023;
+            memcpy(pending, start, remain);
+            pending[remain] = '\0';
+            *used = remain;
+        }
+        attempts++;
     }
 
     return got_ok ? 0 : -1;
@@ -356,6 +364,7 @@ int main(int argc, char **argv) {
                 printf("  help            Affiche cette aide\n");
                 printf("  quit            Quitter le programme\n");
                 printf("  LAUNCH          Simuler un lancement (mise a jour modele local)\n");
+                printf("  explode         Faire exploser la fusee immediatement\n");
                 printf("  log 0|1         Activer/desactiver l'affichage [GEN] stats (off par defaut)\n");
                 printf("  SET <champ> <v> Injecter une nouvelle valeur puis laisser la simulation continuer\n");
                 printf("                  Champs : ALTITUDE SPEED FUEL TEMP PRESSURE THRUST STRESS\n");
@@ -366,6 +375,24 @@ int main(int argc, char **argv) {
                 printf("  resolve         Reduire symptomes (SET STRESS 0 + TEMP 20)\n");
                 printf("  reset           Reset complet de la simulation a l'etat initial\n");
                 printf("===================================================\n\n");
+                fflush(stdout);
+                continue;
+            }
+
+            if (!strcmp(line, "explode") || !strcmp(line, "EXPLODE")) {
+                gen_on_event(&gm, "EXPLODE");
+                printf("[INJECTOR] Explosion forcee demandee\n");
+                if (fd < 0) {
+                    printf("[INJECTOR] non connecte au satellite, explosion locale uniquement\n");
+                    fflush(stdout);
+                    continue;
+                }
+                if (send_set(fd, "EXPLODE", pending, &used, &gm) < 0) {
+                    printf("[INJECTOR] erreur envoi EXPLODE – connexion perdue\n");
+                    fflush(stdout);
+                    close(fd);
+                    fd = -1;
+                }
                 fflush(stdout);
                 continue;
             }
@@ -409,6 +436,25 @@ int main(int argc, char **argv) {
                     fflush(stdout);
                     continue;
                 }
+                if (gm.exploded) {
+                    printf("[INJECTOR] Resolve apres explosion -> reset complet\n");
+                    reset_simulation(&gm);
+                    if (send_set(fd, "RESET", pending, &used, &gm) < 0) {
+                        printf("[INJECTOR] erreur envoi RESET – connexion perdue\n");
+                        fflush(stdout);
+                        close(fd);
+                        fd = -1;
+                    } else if (send_telemetry(fd, &gm, pending, &used) < 0) {
+                        printf("[INJECTOR] erreur envoi reset – connexion perdue\n");
+                        fflush(stdout);
+                        close(fd);
+                        fd = -1;
+                    } else {
+                        printf("[INJECTOR] Explosion effacee, mission remise a zero.\n");
+                    }
+                    fflush(stdout);
+                    continue;
+                }
                 printf("[INJECTOR] Reduction symptomes panne (SET STRESS 0 + SET TEMP 20)\n");
                 gm.stress = 0.0;
                 gm.temp_c = 20.0;
@@ -433,7 +479,12 @@ int main(int argc, char **argv) {
                     fflush(stdout);
                     continue;
                 }
-                if (send_telemetry(fd, &gm, pending, &used) < 0) {
+                if (send_set(fd, "RESET", pending, &used, &gm) < 0) {
+                    printf("[INJECTOR] erreur envoi RESET – connexion perdue\n");
+                    fflush(stdout);
+                    close(fd);
+                    fd = -1;
+                } else if (send_telemetry(fd, &gm, pending, &used) < 0) {
                     printf("[INJECTOR] erreur envoi reset – connexion perdue\n");
                     fflush(stdout);
                     close(fd);

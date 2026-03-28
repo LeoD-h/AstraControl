@@ -116,6 +116,22 @@ void actuator_led_red_on(void) {
 #endif
 }
 
+void actuator_led_red_blink(int count) {
+#ifdef USE_WIRINGPI
+    int i;
+    digitalWrite(PIN_LED_GREEN_PHYS, 0);
+    for (i = 0; i < count; i++) {
+        digitalWrite(PIN_LED_RED_PHYS, 1);
+        usleep(140000);
+        digitalWrite(PIN_LED_RED_PHYS, 0);
+        usleep(110000);
+    }
+#else
+    printf("[LED] ROUGE clignote %dx\n", count);
+    fflush(stdout);
+#endif
+}
+
 void actuator_led_set(int state) {
 #ifdef USE_WIRINGPI
     if (state == 0) {

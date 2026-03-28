@@ -26,6 +26,8 @@
  *   SET PRESSURE <v>\n      -> OK\n
  *   SET THRUST <v>\n        -> OK\n
  *   SET STRESS <v>\n        -> OK\n
+ *   EXPLODE\n               -> OK\n
+ *   RESET\n                 -> OK\n
  *
  * Push Satellite -> JoyPi (CONTROLLER) :
  *   TELEMETRY alt=<v> speed=<v> fuel=<v> temp=<v> pressure=<v> thrust=<v> state=<STATE>\n
@@ -36,6 +38,7 @@
  *
  * Push Satellite -> controle_fusee_data (INJECTOR) :
  *   CMD_EVENT LAUNCH\n | CMD_EVENT LAND\n | CMD_EVENT PAUSE\n | CMD_EVENT RESUME\n
+ *   CMD_EVENT EXPLODE\n
  *   CMD_EVENT FIX_TEMP\n | CMD_EVENT FIX_STRESS\n
  *
  * Auteurs     : Léo, Inès, Juliann

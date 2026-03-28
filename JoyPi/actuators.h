@@ -34,6 +34,9 @@ void actuator_led_green_blink(int count);
  * Utilisée à l'atterrissage. */
 void actuator_led_red_on(void);
 
+/* LED rouge clignotante, utilisée à l'explosion. */
+void actuator_led_red_blink(int count);
+
 /* Éteindre les deux LEDs. */
 void actuator_led_all_off(void);
 

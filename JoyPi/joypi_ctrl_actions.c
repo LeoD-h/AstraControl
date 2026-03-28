@@ -68,21 +68,23 @@ static void password_backspace(ControllerState *st) {
 /* ------------------------------------------------------------------ */
 
 static void handle_response_launch(ControllerState *st, const char *resp) {
-    (void)st;
     if (strcmp(resp, "OK LAUNCH") == 0) {
         /* Le satellite va broadcaster EVENT LAUNCH → handle_event s'occupe
          * des actuateurs (LED, matrice, mélodie) et de LAUNCH_OK pipe.
          * On ne fait rien ici pour éviter la double exécution bloquante. */
         printf("[ctrl] CMD LU accepté — EVENT LAUNCH attendu du satellite\n");
     } else if (strcmp(resp, "FAIL ALREADY_LAUNCHED") == 0) {
+        st->launch_in_progress = false;
         printf("[ctrl] ECHEC lancement : déjà en vol\n");
         actuator_led_set(1);
         actuator_buzzer_bip();
     } else if (strcmp(resp, "FAIL NOT_READY") == 0) {
+        st->launch_in_progress = false;
         printf("[ctrl] ECHEC lancement : satellite non prêt\n");
         actuator_led_set(1);
         actuator_buzzer_bip();
     } else {
+        st->launch_in_progress = false;
         printf("[ctrl] Réponse inattendue (CMD LU) : %s\n", resp);
     }
 }
@@ -166,13 +168,21 @@ static void handle_response_mel(const char *resp) {
 static void password_confirm(ControllerState *st) {
     if (strcmp(st->password_buf, PASSWORD_CORRECT) == 0) {
         printf("[ctrl] Mot de passe correct, lancement...\n");
+        if (st->launch_in_progress) {
+            printf("[ctrl] Lancement deja en cours, seconde demande ignoree\n");
+            password_reset(st);
+            return;
+        }
         ir_disarm();
         st->mode = MODE_NORMAL;
         st->explosion_notified = false;
         password_reset(st);
+        st->launch_in_progress = true;
         char resp[256];
         if (send_cmd_recv(st, "CMD LU\n", resp, sizeof(resp))) {
             handle_response_launch(st, resp);
+        } else {
+            st->launch_in_progress = false;
         }
     } else {
         printf("[ctrl] Mot de passe incorrect\n");

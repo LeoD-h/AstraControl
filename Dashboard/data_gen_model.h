@@ -41,5 +41,6 @@ void gen_init(GenModel *gm);
 void gen_reset_to_ground(GenModel *gm);
 void gen_on_event(GenModel *gm, const char *event);
 void gen_step(GenModel *gm, double dt_s);
+double gen_controlled_landing_target_fuel(const GenModel *gm);
 
 #endif /* DATA_GEN_MODEL_H */

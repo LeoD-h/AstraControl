@@ -30,11 +30,11 @@ static int gen_in_orbit(const GenModel *gm) {
 
 static double fuel_burn_per_sec(const GenModel *gm) {
     if (gm->fuel_pct > 70.0)
-        return 1.9;
+        return 1.40;
     if (gm->fuel_pct > 20.0)
-        return 1.5;
+        return 1.10;
     if (gm->fuel_pct > 0.0)
-        return 0.7;
+        return 0.60;
     return 0.0;
 }
 
@@ -42,6 +42,13 @@ static double nominal_speed_target(const GenModel *gm) {
     double progress = clampd(gm->ascent_elapsed_s / ASCENT_TARGET_S, 0.0, 1.0);
     double curve = progress * progress * (3.0 - (2.0 * progress));
     return 4000.0 + (ORBIT_SPEED_KMH - 4000.0) * curve;
+}
+
+double gen_controlled_landing_target_fuel(const GenModel *gm) {
+    double target_end = clampd(gm->landing_start_fuel_pct - 18.0, 10.0, 14.0);
+    double progress = clampd(gm->landing_elapsed_s / LANDING_TARGET_S, 0.0, 1.0);
+    return gm->landing_start_fuel_pct +
+           (target_end - gm->landing_start_fuel_pct) * progress;
 }
 
 void gen_init(GenModel *gm) {
@@ -92,6 +99,11 @@ void gen_on_event(GenModel *gm, const char *event) {
         gm->paused = true;
     } else if (!strcmp(event, "RESUME")) {
         gm->paused = false;
+    } else if (!strcmp(event, "EXPLODE")) {
+        gm->exploded = true;
+        gm->launched = false;
+        gm->landing = false;
+        gm->thrust_kn = 0.0;
     } else if (!strcmp(event, "TILT_LEFT") || !strcmp(event, "TILT_RIGHT")) {
         if (gm->launched && gm->speed_kmh > 700.0) gm->stress += 1.2;
     } else if (!strcmp(event, "FIX_PROBLEM")) {
@@ -158,7 +170,7 @@ void gen_step(GenModel *gm, double dt_s) {
                 gm->altitude_m = 0.0;
 
             if (gm->fuel_pct > 0.0) {
-                double burn = fuel_burn_per_sec(gm) + (0.8 * recovery_ratio);
+                double burn = fuel_burn_per_sec(gm) + (0.18 * recovery_ratio);
                 gm->fuel_pct -= burn * dt_s;
                 if (gm->fuel_pct < 0.0)
                     gm->fuel_pct = 0.0;
@@ -178,6 +190,10 @@ void gen_step(GenModel *gm, double dt_s) {
 
         if (gm->fuel_pct <= 0.0) {
             gm->fuel_pct = 0.0;
+            gm->exploded = true;
+            gm->launched = false;
+            gm->landing = false;
+            gm->thrust_kn = 0.0;
         }
 
     } else if (gm->launched && gm->landing) {
@@ -194,11 +210,15 @@ void gen_step(GenModel *gm, double dt_s) {
         gm->thrust_kn  = controlled_descent ? (820.0 + (520.0 * correction_ratio)) : 120.0;
         if (controlled_descent) {
             double descent_rate = 1800.0 + (3200.0 * (1.0 - progress));
-            double landing_burn = (0.24 - (0.08 * progress)) + (1.9 * correction_ratio);
+            double target_fuel = gen_controlled_landing_target_fuel(gm);
+            double landing_burn = 0.0;
             gm->speed_kmh += (160.0 - gm->speed_kmh) * (0.17 + (0.33 * correction_ratio)) * dt_s;
             gm->speed_kmh = clampd(gm->speed_kmh, 140.0, 6000.0);
             gm->altitude_m -= descent_rate * dt_s;
-            gm->fuel_pct -= landing_burn * dt_s;
+            if (dt_s > 0.0 && gm->fuel_pct > target_fuel) {
+                landing_burn = (gm->fuel_pct - target_fuel) / dt_s;
+                gm->fuel_pct -= landing_burn * dt_s;
+            }
             gm->fuel_pct = clampd(gm->fuel_pct, 0.0, 100.0);
         } else {
             double descent_rate = 2200.0 + (1600.0 * (1.0 - progress));
@@ -209,9 +229,17 @@ void gen_step(GenModel *gm, double dt_s) {
         }
         gm->fuel_pct = clampd(gm->fuel_pct, 0.0, 100.0);
 
-        if (gm->altitude_m <= 0.0) {
+        if (gm->fuel_pct <= 0.0) {
+            gm->fuel_pct = 0.0;
+            gm->exploded = true;
+            gm->launched = false;
+            gm->landing = false;
+            gm->thrust_kn = 0.0;
+        }
+
+        if (!gm->exploded && gm->altitude_m <= 0.0) {
             gm->altitude_m = 0.0;
-            if (gm->speed_kmh > 220.0 || gm->fuel_pct <= 0.0 || !controlled_descent) {
+            if (gm->fuel_pct <= 0.0 || !controlled_descent) {
                 gm->exploded = true;
             } else {
                 gm->launched  = false;

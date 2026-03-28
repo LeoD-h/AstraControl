@@ -98,6 +98,7 @@ vm: $(BIN_UTIL_DIR) \
 # Cross-compile ARM avec wiringPi + ncurses
 joypi: $(BIN_UTIL_DIR) $(BIN_TEST_DIR) \
 	$(DASHBOARD_JOYPI) $(CONTROLLER_JOYPI) \
+	$(SAT_RPI) $(DATA_VM_RPI) \
 	$(BTN_TEST_JOYPI) $(ACT_TEST_JOYPI) $(STOP_TEST_JOYPI) \
 	$(IR_TEST_JOYPI) $(MOTOR_TEST_JOYPI) $(HW_BTN_TEST_JOYPI)
 	$(Q)rm -rf $(JOYPI_DIR)
@@ -150,6 +151,10 @@ joypi: $(BIN_UTIL_DIR) $(BIN_TEST_DIR) \
 	@echo "  bin-util/controle_fusee   <- ARM ncurses dashboard"
 	@echo "  bin-util/joypi_controller <- ARM client satellite (wiringPi)"
 	@echo "  tests/                    <- binaires de test hardware"
+	# Aussi préparer le dossier VM avec les binaires ARM
+	$(Q)mkdir -p $(VM_DIR)/bin-util
+	$(Q)cp -f $(SAT_RPI)     $(VM_DIR)/bin-util/satellite_server_rpi
+	$(Q)cp -f $(DATA_VM_RPI) $(VM_DIR)/bin-util/controle_fusee_data_rpi
 
 # ------------ Règles de compilation ------------
 

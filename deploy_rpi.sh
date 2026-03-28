@@ -1,5 +1,5 @@
-# IP Joypi : 10.91.231
-# IP RPI : 10.91/241/58
+# IP Joypi : 10.91.241.75
+# IP RPI : 10.91.241.138
 
 #!/usr/bin/env bash
 # deploy_joypi.sh — Déploie To-JoyPI/ vers le JoyPi via scp/ssh
@@ -8,11 +8,11 @@
 
 set -e
 
-JOYPI_IP="${1:-10.91.241.75}"
-JOYPI_USER="${2:-pi}"
-JOYPI_PASS="raspberry"
-REMOTE_DIR="/home/${JOYPI_USER}/Desktop/To-JoyPI"
-LOCAL_DIR="$(cd "$(dirname "$0")/To-JoyPI" && pwd)"
+JOYPI_IP="${1:-10.91.241.138}"
+JOYPI_USER="${2:-juliann}"
+JOYPI_PASS="1234"
+REMOTE_DIR="/home/${JOYPI_USER}/Desktop/To-RPI"
+LOCAL_DIR="$(cd "$(dirname "$0")/To-VM" && pwd)"
 
 if ! command -v sshpass &>/dev/null; then
     echo "[!] sshpass non trouvé — install : sudo apt install sshpass"

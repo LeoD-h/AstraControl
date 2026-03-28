@@ -26,6 +26,34 @@ static int telemetry_in_orbit(void) {
     return g_telem.altitude >= 100000;
 }
 
+static void trigger_explosion(SatClientH clients[], const char *reason) {
+    g_telem.state = SAT_STATE_EXPLODED;
+    broadcast_controllers(clients, "EVENT EXPLODED");
+    broadcast_injectors(clients, "CMD_EVENT EXPLODE");
+    write_to_pipe(&g_cmd_pipe_fd, CMD_PIPE, "EXPLODE");
+    if (reason && reason[0]) {
+        log_line("WARN", "%s", reason);
+    }
+}
+
+static void reset_telemetry_state(void) {
+    g_telem.altitude = 0;
+    g_telem.speed = 0;
+    g_telem.fuel = 100;
+    g_telem.temp = 20;
+    g_telem.pressure = 1013;
+    g_telem.thrust = 0;
+    g_telem.stress = 0;
+    g_telem.state = SAT_STATE_READY;
+    g_telem.pressure_fault = false;
+    g_telem.pressure_corrector = false;
+    g_telem.fault1_active = false;
+    g_telem.fault2_active = false;
+    g_fault1_started = 0;
+    g_fault2_started = 0;
+    g_altitude_received = false;
+}
+
 static void refresh_state_from_telemetry(void) {
     if (g_telem.state == SAT_STATE_EXPLODED)
         return;
@@ -101,29 +129,21 @@ void check_state_transitions(SatClientH clients[]) {
     time_t now = time(NULL);
 
     if (g_telem.fault1_active && g_fault1_started != 0 && (now - g_fault1_started) >= 10) {
-        g_telem.state = SAT_STATE_EXPLODED;
-        broadcast_controllers(clients, "EVENT EXPLODED");
-        write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "EXPLODE");
-        log_line("WARN", "fault1 non resolue depuis 10s -> EXPLODED");
+        trigger_explosion(clients, "fault1 non resolue depuis 10s -> EXPLODED");
         g_fault1_started = 0;
         return;
     }
     if (g_telem.fault2_active && g_fault2_started != 0 && (now - g_fault2_started) >= 10) {
-        g_telem.state = SAT_STATE_EXPLODED;
-        broadcast_controllers(clients, "EVENT EXPLODED");
-        write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "EXPLODE");
-        log_line("WARN", "fault2 non resolue depuis 10s -> EXPLODED");
+        trigger_explosion(clients, "fault2 non resolue depuis 10s -> EXPLODED");
         g_fault2_started = 0;
         return;
     }
 
-    /* Carburant épuisé en vol -> atterrissage automatique */
-    if (g_telem.state == SAT_STATE_FLYING && g_telem.fuel <= 0) {
-        g_telem.state = SAT_STATE_LANDING;
-        log_line("INFO", "carburant epuise -> LANDING automatique");
-        broadcast_controllers(clients, "EVENT LAND_AUTO");
-        broadcast_injectors(clients, "CMD_EVENT LAND");
-        write_to_pipe(&g_cmd_pipe_fd, "/tmp/rocket_cmd.pipe", "LAND");
+    if ((g_telem.state == SAT_STATE_FLYING
+         || g_telem.state == SAT_STATE_LANDING
+         || g_telem.state == SAT_STATE_EMERGENCY)
+            && g_telem.fuel <= 0) {
+        trigger_explosion(clients, "carburant epuise en phase active -> EXPLODED");
         return;
     }
 
@@ -314,6 +334,17 @@ static void handle_injector_cmd(SatClientH clients[], int idx, const char *line)
         return;
     }
 
+    if (strcmp(line, "RESET") == 0) {
+        reset_telemetry_state();
+        broadcast_controllers(clients, "EVENT RESET");
+        write_to_pipe(&g_cmd_pipe_fd, CMD_PIPE, "RESET_SIM");
+        write_to_pipe(&g_cmd_pipe_fd, CMD_PIPE, "CLEAR_ALERTS");
+        write_to_pipe(&g_data_pipe_fd, DATA_PIPE, "PROBLEM OFF");
+        log_line("INFO", "reset complet demande par injector peer=%s", c->peer);
+        send_to_client(c->fd, "OK");
+        return;
+    }
+
     if (strncmp(line, "SET ", 4) == 0) {
         char field[32] = {0};
         int  val       = 0;
@@ -377,6 +408,12 @@ static void handle_injector_cmd(SatClientH clients[], int idx, const char *line)
         } else {
             send_to_client(c->fd, "FAIL BAD_FORMAT");
         }
+        return;
+    }
+
+    if (strcmp(line, "EXPLODE") == 0) {
+        trigger_explosion(clients, "explosion forcee demandee par injector");
+        send_to_client(c->fd, "OK");
         return;
     }
 

@@ -14,6 +14,12 @@
 #include <math.h>
 #include <stdio.h>
 
+static int clampi(int value, int lo, int hi) {
+    if (value < lo) return lo;
+    if (value > hi) return hi;
+    return value;
+}
+
 static bool in_orbit(const RocketState *st) {
     return st->altitude >= 100000;
 }
@@ -27,6 +33,19 @@ static int nominal_speed_target(const RocketState *st) {
     if (st->fuel > 70)
         return 9000 + ((9000 * alt_ratio) / 100000);
     return 18000 + ((9200 * alt_ratio) / 100000);
+}
+
+static int controlled_landing_target_fuel(const RocketState *st) {
+    int progress_pct = 0;
+    int target_end = clampi(st->landing_start_fuel - 18, 10, 14);
+
+    if (st->altitude <= 0) {
+        return target_end;
+    }
+    progress_pct = 100 - ((st->altitude * 100) / 100000);
+    progress_pct = clampi(progress_pct, 0, 100);
+    return st->landing_start_fuel +
+           ((target_end - st->landing_start_fuel) * progress_pct) / 100;
 }
 
 void update_dynamics(RocketState *st, int frame_ms) {
@@ -57,6 +76,7 @@ void update_dynamics(RocketState *st, int frame_ms) {
         } else if (st->fuel > 0 && !in_orbit(st)) {
             int speed_target = nominal_speed_target(st);
             int speed_deficit = speed_target - st->speed;
+            int fuel_burn = st->fuel > 70 ? 2 : (st->fuel > 20 ? 1 : 0);
             if (st->fuel > 70) {
                 if (st->speed < 18000)
                     st->speed += 120 + (speed_deficit > 0 ? speed_deficit / 80 : 0);
@@ -67,6 +87,10 @@ void update_dynamics(RocketState *st, int frame_ms) {
                 st->altitude += st->speed / 28;
             }
 
+            st->fuel -= fuel_burn;
+            if (st->fuel < 0) {
+                st->fuel = 0;
+            }
             if (st->altitude >= 100000) {
                 st->altitude = 100000;
                 st->speed = 27200;
@@ -93,18 +117,13 @@ void update_dynamics(RocketState *st, int frame_ms) {
             st->sim_tick = 0;
         } else {
             st->fuel = 0;
-            if (!in_orbit(st)) {
-                if (!st->landing) {
-                    st->landing = true;
-                    st->problem_active = true;
-                    st->alerts[2] = true;
-                    snprintf(st->last_event, sizeof(st->last_event),
-                             "Fuel exhausted outside orbit: ballistic return");
-                }
-                st->speed = st->speed > 40 ? st->speed - 30 : 0;
-            } else {
-                st->downrange += st->speed / 160;
-            }
+            st->exploded = true;
+            st->launched = false;
+            st->landing = false;
+            st->problem_active = true;
+            st->alerts[0] = st->alerts[1] = st->alerts[2] = true;
+            snprintf(st->last_event, sizeof(st->last_event),
+                     "Fuel exhausted during flight: vehicle lost");
             st->thrust_kn = 0;
             st->flame_size = 0;
         }
@@ -137,12 +156,16 @@ void update_dynamics(RocketState *st, int frame_ms) {
                                   !st->fault1_display && !st->fault2_display);
 
         if (controlled_descent) {
+            int target_fuel = controlled_landing_target_fuel(st);
             st->speed = st->speed > 140 ? st->speed - 420 : 140;
             {
                 int descent_step = st->altitude / 14;
                 if (descent_step < 160) descent_step = 160;
                 if (descent_step > 2600) descent_step = 2600;
                 st->altitude = st->altitude > descent_step ? st->altitude - descent_step : 0;
+            }
+            if (st->fuel > target_fuel) {
+                st->fuel = target_fuel;
             }
         } else {
             st->problem_active = true;
@@ -153,7 +176,21 @@ void update_dynamics(RocketState *st, int frame_ms) {
                      "Landing unstable: insufficient fuel reserve or excessive speed");
         }
 
-        if (st->altitude > 600) {
+        if (st->fuel <= 0) {
+            st->fuel = 0;
+            st->exploded = true;
+            st->launched = false;
+            st->landing = false;
+            st->problem_active = true;
+            st->alerts[0] = st->alerts[1] = st->alerts[2] = true;
+            st->flame_size = 0;
+            snprintf(st->last_event, sizeof(st->last_event),
+                     "Fuel exhausted during landing: vehicle lost");
+        }
+
+        if (st->exploded) {
+            st->flame_size = 0;
+        } else if (st->altitude > 600) {
             st->flame_size = 4;
         } else if (st->altitude > 300) {
             st->flame_size = 3;
@@ -163,9 +200,9 @@ void update_dynamics(RocketState *st, int frame_ms) {
             st->flame_size = 1;
         }
 
-        if (st->altitude <= 0) {
+        if (!st->exploded && st->altitude <= 0) {
             st->altitude       = 0;
-            if (st->speed > 220 || st->fuel <= 0) {
+            if (st->fuel <= 0) {
                 st->exploded = true;
                 st->flame_size = 0;
                 st->alerts[0] = st->alerts[1] = st->alerts[2] = true;
@@ -260,17 +297,8 @@ void update_dynamics(RocketState *st, int frame_ms) {
 
     if (st->launch_auth_result_ticks > 0) {
         st->launch_auth_result_ticks--;
-        if (st->launch_auth_result_ticks == 0 && st->launch_auth_ok && !st->launched) {
-            st->launched = true;
-            st->landing = false;
-            st->exploded = false;
-            st->paused = false;
-            st->fuel  = 100;
-            st->speed = 180;
-            prev_speed = st->speed;
+        if (st->launch_auth_result_ticks == 0) {
             st->launch_auth_ok = false;
-            snprintf(st->last_event, sizeof(st->last_event),
-                     "Ignition sequence complete: liftoff");
         }
     }
 

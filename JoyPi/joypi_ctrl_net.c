@@ -30,6 +30,45 @@
 static char   g_push_buf[2048];
 static size_t g_push_used = 0;
 
+static void handle_push_line(ControllerState *st, const char *line);
+
+static int is_push_line(const char *line) {
+    return (strncmp(line, "TELEMETRY ", 10) == 0)
+        || (strncmp(line, "EVENT ", 6) == 0);
+}
+
+static int pop_buffered_line(char *out, size_t out_sz) {
+    char *nl;
+    size_t len;
+
+    if (g_push_used == 0)
+        return 0;
+    nl = strchr(g_push_buf, '\n');
+    if (nl == NULL)
+        return 0;
+
+    len = (size_t)(nl - g_push_buf);
+    if (len >= out_sz)
+        len = out_sz - 1;
+    memcpy(out, g_push_buf, len);
+    out[len] = '\0';
+
+    ++nl;
+    memmove(g_push_buf, nl, strlen(nl) + 1);
+    g_push_used = strlen(g_push_buf);
+    return 1;
+}
+
+static void buffer_incoming_bytes(const char *buf, size_t len) {
+    if (len == 0)
+        return;
+    if (g_push_used + len >= sizeof(g_push_buf) - 1)
+        g_push_used = 0;
+    memcpy(g_push_buf + g_push_used, buf, len);
+    g_push_used += len;
+    g_push_buf[g_push_used] = '\0';
+}
+
 /* ------------------------------------------------------------------ */
 /* Pipes locaux                                                        */
 /* ------------------------------------------------------------------ */
@@ -160,6 +199,8 @@ bool send_cmd_recv(ControllerState *st,
                    const char *cmd,
                    char *resp,
                    size_t resp_sz) {
+    time_t deadline;
+
     if (st->sat_fd < 0 || !st->authed) {
         fprintf(stderr, "[ctrl] Non connecté au satellite\n");
         return false;
@@ -173,42 +214,56 @@ bool send_cmd_recv(ControllerState *st,
         return false;
     }
 
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    FD_SET(st->sat_fd, &rfds);
-    struct timeval tv = {CMD_TIMEOUT_S, 0};
-    int rc = select(st->sat_fd + 1, &rfds, NULL, NULL, &tv);
-    if (rc <= 0) {
-        fprintf(stderr, "[ctrl] Timeout réponse (cmd=%s)\n", cmd);
-        close(st->sat_fd);
-        st->sat_fd = -1;
-        st->authed = false;
-        return false;
-    }
+    deadline = time(NULL) + CMD_TIMEOUT_S;
 
-    ssize_t nr = read(st->sat_fd, resp, (ssize_t)resp_sz - 1);
-    if (nr <= 0) {
-        close(st->sat_fd);
-        st->sat_fd = -1;
-        st->authed = false;
-        return false;
-    }
-    resp[nr] = '\0';
-
-    /* Sauvegarder les octets surplus dans g_push_buf */
-    char *nl = strchr(resp, '\n');
-    if (nl) {
-        const char *leftover     = nl + 1;
-        size_t      leftover_len = strlen(leftover);
-        if (leftover_len > 0
-                && g_push_used + leftover_len < sizeof(g_push_buf) - 1) {
-            memmove(g_push_buf + leftover_len, g_push_buf, g_push_used + 1);
-            memcpy(g_push_buf, leftover, leftover_len);
-            g_push_used += leftover_len;
+    while (1) {
+        char line[512];
+        if (pop_buffered_line(line, sizeof(line))) {
+            if (line[0] == '\0')
+                continue;
+            if (is_push_line(line)) {
+                handle_push_line(st, line);
+                continue;
+            }
+            snprintf(resp, resp_sz, "%s", line);
+            return true;
         }
-        *nl = '\0';
+
+        fd_set rfds;
+        struct timeval tv;
+        time_t now = time(NULL);
+        int timeout_s = (int)(deadline - now);
+
+        if (timeout_s < 0)
+            timeout_s = 0;
+
+        FD_ZERO(&rfds);
+        FD_SET(st->sat_fd, &rfds);
+        tv.tv_sec = timeout_s;
+        tv.tv_usec = 200000;
+        if (select(st->sat_fd + 1, &rfds, NULL, NULL, &tv) <= 0) {
+            if (time(NULL) >= deadline)
+                break;
+            continue;
+        }
+
+        char buf[512];
+        ssize_t nr = read(st->sat_fd, buf, sizeof(buf) - 1);
+        if (nr <= 0) {
+            close(st->sat_fd);
+            st->sat_fd = -1;
+            st->authed = false;
+            return false;
+        }
+        buf[nr] = '\0';
+        buffer_incoming_bytes(buf, (size_t)nr);
     }
-    return true;
+
+    fprintf(stderr, "[ctrl] Timeout réponse (cmd=%s)\n", cmd);
+    close(st->sat_fd);
+    st->sat_fd = -1;
+    st->authed = false;
+    return false;
 }
 
 /* ------------------------------------------------------------------ */
@@ -288,13 +343,14 @@ static void handle_telemetry(ControllerState *st, const char *line) {
 static void handle_event(ControllerState *st, const char *event) {
     if (strcmp(event, "LAUNCH") == 0) {
         printf("[ctrl] EVENT LAUNCH\n");
+        st->launch_in_progress = false;
         st->explosion_notified = false;
-        cmd_pipe_write(st, "LAUNCH_OK\n");
         /* Actuateurs exécutés ici (une seule fois) : */
         actuator_led_green_blink(4);
         actuator_led_set(2);
         actuator_matrix_launch();
         actuator_buzzer_bip();
+        cmd_pipe_write(st, "LAUNCH_OK\n");
 
     } else if (strcmp(event,"LAND")==0 || strcmp(event,"LAND_AUTO")==0) {
         printf("[ctrl] EVENT %s\n", event);
@@ -303,8 +359,22 @@ static void handle_event(ControllerState *st, const char *event) {
 
     } else if (strcmp(event, "LANDED") == 0) {
         printf("[ctrl] EVENT LANDED\n");
+        st->launch_in_progress = false;
         st->explosion_notified = false;
         cmd_pipe_write(st, "SIM_FLIGHT OFF\n");
+        actuator_led_all_off();
+        actuator_matrix_clear();
+
+    } else if (strcmp(event, "RESET") == 0) {
+        printf("[ctrl] EVENT RESET\n");
+        st->launch_in_progress = false;
+        st->explosion_notified = false;
+        st->fault_active = false;
+        st->fault1_active = false;
+        st->fault2_active = false;
+        data_pipe_write(st, "PROBLEM OFF\n");
+        cmd_pipe_write(st, "RESET_SIM\n");
+        cmd_pipe_write(st, "CLEAR_ALERTS\n");
         actuator_led_all_off();
         actuator_matrix_clear();
 
@@ -356,10 +426,11 @@ static void handle_event(ControllerState *st, const char *event) {
     } else if (strcmp(event, "EXPLODED") == 0) {
         if (st->explosion_notified)
             return;
+        st->launch_in_progress = false;
         st->explosion_notified = true;
         printf("[ctrl] EVENT EXPLODED\n");
         cmd_pipe_write(st, "EXPLODE\n");
-        actuator_led_set(1);
+        actuator_led_red_blink(8);
         actuator_buzzer_bip();
     } else {
         printf("[ctrl] EVENT inconnu : %s\n", event);
@@ -427,12 +498,17 @@ void poll_auth_pipe(ControllerState *st) {
     if (nr <= 0) return;
     buf[nr] = '\0';
     if (strncmp(buf, "LAUNCH_AUTH_OK", 14) == 0 && st->authed) {
+        if (st->launch_in_progress) {
+            printf("[ctrl] Auth clavier ignorée : lancement deja en cours\n");
+            return;
+        }
         printf("[ctrl] Auth clavier reçue → envoi CMD LU au satellite\n");
         /* Sortir du mode PASSWORD dans tous les cas (clavier USB a pris la main) */
         st->mode = MODE_NORMAL;
 #ifdef USE_WIRINGPI
         ir_disarm();
 #endif
+        st->launch_in_progress = true;
         char resp[256];
         if (send_cmd_recv(st, "CMD LU\n", resp, sizeof(resp))
                 && strncmp(resp, "OK LAUNCH", 9) == 0) {
@@ -440,6 +516,7 @@ void poll_auth_pipe(ControllerState *st) {
              * exécutera les actuateurs et enverra LAUNCH_OK au pipe. */
             printf("[ctrl] CMD LU accepté (clavier) — EVENT LAUNCH attendu\n");
         } else {
+            st->launch_in_progress = false;
             printf("[ctrl] Auth clavier : satellite refus (%s)\n", resp);
             actuator_led_set(1);
             actuator_buzzer_bip();
@@ -467,6 +544,7 @@ void state_init(ControllerState *st, const char *ip, int port) {
     st->fault1_active       = false;
     st->fault2_active       = false;
     st->explosion_notified  = false;
+    st->launch_in_progress  = false;
     strncpy(st->sat_ip, ip, sizeof(st->sat_ip) - 1);
     st->sat_ip[sizeof(st->sat_ip) - 1] = '\0';
     st->sat_port = port;
